@@ -796,16 +796,14 @@ async def auto_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             data={'chat_id': update.effective_chat.id}
         )
         
-        await update.message.reply_text("""
-✅ **Автоматические сигналы запущены!**
+        await update.message.reply_text("""✅ **Автоматические сигналы запущены!**
 
 🕐 **Интервал:** каждые 30 минут
 📊 **Анализ:** 20 популярных монет
 🏆 **Отправка:** топ-3 лучших сигнала
 ⏰ **Первый сигнал:** через 10 секунд
 
-Используйте /auto_stop для остановки
-        """)
+Используйте /auto_stop для остановки""")
         
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка запуска автоматических сигналов: {str(e)}")
@@ -817,11 +815,9 @@ async def auto_stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for job in jobs:
             job.schedule_removal()
         
-        await update.message.reply_text("""
-🛑 **Автоматические сигналы остановлены!**
+        await update.message.reply_text("""🛑 **Автоматические сигналы остановлены!**
 
-Используйте /auto_start для повторного запуска
-        """)
+Используйте /auto_start для повторного запуска""")
         
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка остановки автоматических сигналов: {str(e)}")
@@ -1733,12 +1729,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    print(f"🔘 Нажата кнопка: {query.data}")  # Для отладки в Replit
     logger.info(f"🔘 Нажата кнопка: {query.data}")
     
-    if query.data.startswith("menu_"):
-        # Обработка кнопок главного меню
-        if query.data == "menu_status":
-            await handle_status_menu(query, context)
+    try:
+        if query.data.startswith("menu_"):
+            print(f"🔍 Обрабатываем меню: {query.data}")  # Отладка
+            # Обработка кнопок главного меню
+            if query.data == "menu_status":
+                print("📊 Открываем статус")  # Отладка
+                await handle_status_menu(query, context)
         elif query.data == "menu_coins":
             await handle_coins_menu(query, context)
         elif query.data == "menu_signals":
@@ -1865,12 +1865,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     probability = 75.0
                     strength_text = "💪 Сильный"
                 elif latest_close < ema_20_latest < ema_50_latest:
-                    signal_type = "🔴 ТОЧКА ВХОДА ШОРТ"
+                    # Отключаем ШОРТ сигналы в fallback тоже, но показываем потенциальное падение
+                    signal_type = "⚪ ОЖИДАНИЕ"
                     entry_price = current_price
-                    take_profit = current_price * 0.965  # -3.5% для шорта
-                    stop_loss = current_price * 1.025    # +2.5% для шорта
+                    take_profit = current_price * 1.02  # Консервативный +2%
+                    stop_loss = current_price * 0.98   # Консервативный -2%
                     probability = 75.0
-                    strength_text = "💪 Сильный"
+                    strength_text = "⚪ Слабый (падение 3.5%)"
                 else:
                     signal_type = "⚪ ОЖИДАНИЕ"
                     entry_price = current_price
@@ -2006,6 +2007,14 @@ async def start_command_from_callback(query, context):
     """
     
     await query.edit_message_text(welcome_message, reply_markup=reply_markup)
+    
+    except Exception as e:
+        print(f"❌ Ошибка в button_callback: {e}")  # Отладка для Replit
+        logger.error(f"❌ Ошибка в button_callback: {e}")
+        try:
+            await query.edit_message_text(f"❌ Ошибка: {str(e)}")
+        except:
+            pass  # Если не можем отправить сообщение, игнорируем
 
 # Глобальные переменные
 current_coin = "BTC/USDT"

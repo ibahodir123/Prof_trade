@@ -15,6 +15,8 @@ import joblib
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+import tensorflow as tf
+from tensorflow.keras.models import load_model
 
 # Настройка matplotlib для работы без GUI
 import matplotlib
@@ -327,26 +329,52 @@ def analyze_coin_signal(symbol):
                 logger.error(f"❌ Некорректная цена входа для {symbol}: {entry_price}")
                 raise ValueError(f"Некорректная цена входа: {entry_price}")
             
-            # Определение сигнала (снижены пороги для более чувствительного анализа)
-            if max_prob > 0.6:
-                signal_type = "⚪ ОЖИДАНИЕ"
-                strength_text = f"Возможное падение {max_prob*100:.1f}%"
-                profit_pct, loss_pct, _ = calculate_dynamic_percentages(max_prob, "SHORT")
-                take_profit = entry_price * (1 - profit_pct)
-                stop_loss = entry_price * (1 + loss_pct)
-                ml_status = "Активна"
-                logger.info(f"🎯 Сигнал: ОЖИДАНИЕ (падение {max_prob*100:.1f}%)")
-                
-            elif min_prob > 0.5:
-                signal_type = "🟢 LONG"
-                strength_text = f"Рост {min_prob*100:.1f}%"
-                profit_pct, loss_pct, _ = calculate_dynamic_percentages(min_prob, "LONG")
-                take_profit = entry_price * (1 + profit_pct)
-                stop_loss = entry_price * (1 - loss_pct)
-                ml_status = "Активна"
-                logger.info(f"🎯 Сигнал: LONG (рост {min_prob*100:.1f}%)")
-                
-            else:
+            # Определение сигнала (исправленная логика сравнения вероятностей)
+            diff = max_prob - min_prob
+            logger.info(f"🔍 ОТЛАДКА: min_prob={min_prob:.3f}, max_prob={max_prob:.3f}, diff={diff:.3f}")
+            
+            if diff > 0.10:  # Максимальный детектор значительно выше
+                logger.info(f"🔍 УСЛОВИЕ 1: diff > 0.10 ({diff:.3f} > 0.10) = True")
+                if max_prob > 0.3:  # Достаточная уверенность для SHORT
+                    logger.info(f"🔍 УСЛОВИЕ 2: max_prob > 0.3 ({max_prob:.3f} > 0.3) = True")
+                    signal_type = "🔴 SHORT"
+                    strength_text = f"Падение {max_prob*100:.1f}%"
+                    profit_pct, loss_pct, _ = calculate_dynamic_percentages(max_prob, "SHORT")
+                    take_profit = entry_price * (1 - profit_pct)
+                    stop_loss = entry_price * (1 + loss_pct)
+                    ml_status = "Активна"
+                    logger.info(f"🎯 Сигнал: SHORT (падение {max_prob*100:.1f}%)")
+                else:
+                    logger.info(f"🔍 УСЛОВИЕ 2: max_prob > 0.3 ({max_prob:.3f} > 0.3) = False")
+                    signal_type = "⚪ ОЖИДАНИЕ"
+                    strength_text = "Слабая уверенность в падении"
+                    take_profit = None
+                    stop_loss = None
+                    ml_status = "Активна"
+                    logger.info(f"🎯 Сигнал: ОЖИДАНИЕ (слабая уверенность в падении)")
+                    
+            elif diff < -0.10:  # Минимальный детектор значительно выше
+                logger.info(f"🔍 УСЛОВИЕ 3: diff < -0.10 ({diff:.3f} < -0.10) = True")
+                if min_prob > 0.3:  # Достаточная уверенность для LONG
+                    logger.info(f"🔍 УСЛОВИЕ 4: min_prob > 0.3 ({min_prob:.3f} > 0.3) = True")
+                    signal_type = "🟢 LONG"
+                    strength_text = f"Рост {min_prob*100:.1f}%"
+                    profit_pct, loss_pct, _ = calculate_dynamic_percentages(min_prob, "LONG")
+                    take_profit = entry_price * (1 + profit_pct)
+                    stop_loss = entry_price * (1 - loss_pct)
+                    ml_status = "Активна"
+                    logger.info(f"🎯 Сигнал: LONG (рост {min_prob*100:.1f}%)")
+                else:
+                    logger.info(f"🔍 УСЛОВИЕ 4: min_prob > 0.3 ({min_prob:.3f} > 0.3) = False")
+                    signal_type = "⚪ ОЖИДАНИЕ"
+                    strength_text = "Слабая уверенность в росте"
+                    take_profit = None
+                    stop_loss = None
+                    ml_status = "Активна"
+                    logger.info(f"🎯 Сигнал: ОЖИДАНИЕ (слабая уверенность в росте)")
+                    
+            else:  # Разница менее 10% - нет четкого сигнала
+                logger.info(f"🔍 УСЛОВИЕ 5: else (diff не в диапазоне >0.10 или <-0.10)")
                 signal_type = "⚪ ОЖИДАНИЕ"
                 strength_text = "Нет четкого сигнала"
                 take_profit = None
@@ -384,25 +412,44 @@ def analyze_coin_signal(symbol):
                     entry_price = df['close'].iloc[-1]
                     logger.info(f"💰 Fallback цена входа для {symbol}: {entry_price}")
                     
-                    # Определение сигнала с fallback порогами
-                    if max_prob > 0.6:
-                        signal_type = "⚪ ОЖИДАНИЕ"
-                        strength_text = f"Fallback ML: падение {max_prob*100:.1f}%"
-                        take_profit = None
-                        stop_loss = None
-                        ml_status = "Fallback ML"
-                        logger.info(f"🎯 Fallback ML сигнал: ОЖИДАНИЕ (падение {max_prob*100:.1f}%)")
-                        
-                    elif min_prob > 0.5:
-                        signal_type = "🟢 LONG"
-                        strength_text = f"Fallback ML: рост {min_prob*100:.1f}%"
-                        profit_pct, loss_pct, _ = calculate_dynamic_percentages(min_prob, "LONG")
-                        take_profit = entry_price * (1 + profit_pct)
-                        stop_loss = entry_price * (1 - loss_pct)
-                        ml_status = "Fallback ML"
-                        logger.info(f"🎯 Fallback ML сигнал: LONG (рост {min_prob*100:.1f}%)")
-                        
-                    else:
+                    # Определение сигнала с исправленной fallback логикой
+                    diff = max_prob - min_prob
+                    
+                    if diff > 0.10:  # Максимальный детектор значительно выше
+                        if max_prob > 0.3:
+                            signal_type = "🔴 SHORT"
+                            strength_text = f"Fallback ML: падение {max_prob*100:.1f}%"
+                            profit_pct, loss_pct, _ = calculate_dynamic_percentages(max_prob, "SHORT")
+                            take_profit = entry_price * (1 - profit_pct)
+                            stop_loss = entry_price * (1 + loss_pct)
+                            ml_status = "Fallback ML"
+                            logger.info(f"🎯 Fallback ML сигнал: SHORT (падение {max_prob*100:.1f}%)")
+                        else:
+                            signal_type = "⚪ ОЖИДАНИЕ"
+                            strength_text = "Fallback ML: слабая уверенность в падении"
+                            take_profit = None
+                            stop_loss = None
+                            ml_status = "Fallback ML"
+                            logger.info(f"🎯 Fallback ML сигнал: ОЖИДАНИЕ (слабая уверенность в падении)")
+                            
+                    elif diff < -0.10:  # Минимальный детектор значительно выше
+                        if min_prob > 0.3:
+                            signal_type = "🟢 LONG"
+                            strength_text = f"Fallback ML: рост {min_prob*100:.1f}%"
+                            profit_pct, loss_pct, _ = calculate_dynamic_percentages(min_prob, "LONG")
+                            take_profit = entry_price * (1 + profit_pct)
+                            stop_loss = entry_price * (1 - loss_pct)
+                            ml_status = "Fallback ML"
+                            logger.info(f"🎯 Fallback ML сигнал: LONG (рост {min_prob*100:.1f}%)")
+                        else:
+                            signal_type = "⚪ ОЖИДАНИЕ"
+                            strength_text = "Fallback ML: слабая уверенность в росте"
+                            take_profit = None
+                            stop_loss = None
+                            ml_status = "Fallback ML"
+                            logger.info(f"🎯 Fallback ML сигнал: ОЖИДАНИЕ (слабая уверенность в росте)")
+                            
+                    else:  # Разница менее 10% - нет четкого сигнала
                         signal_type = "⚪ ОЖИДАНИЕ"
                         strength_text = "Fallback ML: нет четкого сигнала"
                         take_profit = None
@@ -642,6 +689,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📈 Последние сигналы", callback_data="menu_signals")],
         [InlineKeyboardButton("🔍 Анализ монеты", callback_data="menu_analyze")],
         [InlineKeyboardButton("🔍 Поиск монет", callback_data="menu_search")],
+        [InlineKeyboardButton("🚀 Стреляющие монеты", callback_data="menu_shooting_stars")],
         [InlineKeyboardButton("🤖 Авто сигналы", callback_data="menu_auto")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -679,12 +727,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_search_menu(query, context)
         elif query.data == "menu_auto":
             await handle_auto_menu(query, context)
+        elif query.data == "menu_shooting_stars":
+            await handle_shooting_stars_menu(query, context)
         elif query.data.startswith("select_"):
             await handle_coin_selection(query, context)
         elif query.data == "auto_start":
             await handle_auto_start(query, context)
         elif query.data == "auto_stop":
             await handle_auto_stop(query, context)
+        elif query.data == "find_shooting_stars":
+            await handle_find_shooting_stars(query, context)
         elif query.data == "back_to_main":
             await back_to_main_menu(query, context)
             
@@ -841,6 +893,31 @@ async def handle_search_menu(query, context):
     except Exception as e:
         await query.edit_message_text(f"❌ Ошибка поиска: {str(e)}")
 
+async def handle_shooting_stars_menu(query, context):
+    """Обработка кнопки Стреляющие монеты"""
+    try:
+        message = """
+🚀 **Стреляющие монеты**
+
+Анализ всех монет на Binance для поиска потенциальных "стреляющих звезд" - монет, которые могут показать резкий рост в ближайшее время.
+
+**Возможности:**
+• 🔮 LSTM нейронная сеть для предсказаний
+• 📊 Анализ всех USDT пар на Binance
+• 🎯 Топ-10 самых перспективных монет
+• ⚡ Быстрый анализ (до 5 минут)
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("🔮 Найти стреляющие монеты", callback_data="find_shooting_stars")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup)
+    except Exception as e:
+        await query.edit_message_text(f"❌ Ошибка стреляющих монет: {str(e)}")
+
 async def handle_auto_menu(query, context):
     """Обработка кнопки Авто сигналы"""
     try:
@@ -878,6 +955,160 @@ async def handle_coin_selection(query, context):
     # Автоматически показываем анализ в новом сообщении
     await asyncio.sleep(1)
     await handle_signals_menu_new(query, context)
+
+async def handle_find_shooting_stars(query, context):
+    """Поиск стреляющих монет с помощью LSTM модели"""
+    try:
+        # Отправляем сообщение о начале анализа
+        await query.edit_message_text("🔮 **Поиск стреляющих монет...**\n\n⏳ Анализирую все монеты на Binance...")
+        
+        # Получаем список всех монет
+        available_pairs = get_available_pairs()
+        
+        # Ограничиваем анализ первыми 50 монетами для скорости
+        pairs_to_analyze = available_pairs[:50]
+        
+        logger.info(f"🚀 Начинаю поиск стреляющих монет среди {len(pairs_to_analyze)} монет")
+        
+        shooting_stars = []
+        analyzed_count = 0
+        
+        for symbol in pairs_to_analyze:
+            try:
+                # Получаем данные для анализа
+                df = get_binance_data(symbol, '1h', 100)
+                if df is None or len(df) < 50:
+                    continue
+                
+                # Загружаем LSTM модель
+                try:
+                    model = load_model('simple_shooting_star_model.h5')
+                    scaler = joblib.load('simple_shooting_star_scaler.pkl')
+                    
+                    # Подготавливаем данные для LSTM
+                    features = prepare_lstm_features(df)
+                    if features is None:
+                        continue
+                    
+                    # Нормализуем данные
+                    features_scaled = scaler.transform(features)
+                    
+                    # Делаем предсказание
+                    prediction = model.predict(features_scaled[-1:].reshape(1, -1, features_scaled.shape[1]))
+                    shooting_probability = prediction[0][0]
+                    
+                    # Если вероятность высокая, добавляем в список
+                    if shooting_probability > 0.7:
+                        current_price = df['close'].iloc[-1]
+                        shooting_stars.append({
+                            'symbol': symbol,
+                            'probability': shooting_probability,
+                            'price': current_price
+                        })
+                    
+                except Exception as e:
+                    logger.error(f"❌ Ошибка LSTM анализа для {symbol}: {e}")
+                    continue
+                
+                analyzed_count += 1
+                
+                # Обновляем прогресс каждые 10 монет
+                if analyzed_count % 10 == 0:
+                    progress_msg = f"🔮 **Поиск стреляющих монет...**\n\n📊 Проанализировано: {analyzed_count}/{len(pairs_to_analyze)}\n🎯 Найдено стреляющих: {len(shooting_stars)}"
+                    await query.edit_message_text(progress_msg)
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка анализа {symbol}: {e}")
+                continue
+        
+        # Сортируем по вероятности
+        shooting_stars.sort(key=lambda x: x['probability'], reverse=True)
+        
+        # Формируем результат
+        if shooting_stars:
+            message = f"""🚀 **СТРЕЛЯЮЩИЕ МОНЕТЫ НАЙДЕНЫ!**
+
+📊 **Проанализировано:** {analyzed_count} монет
+🎯 **Найдено стреляющих:** {len(shooting_stars)}
+
+**🏆 ТОП-{min(10, len(shooting_stars))} СТРЕЛЯЮЩИХ МОНЕТ:**
+
+"""
+            
+            for i, star in enumerate(shooting_stars[:10], 1):
+                probability_pct = star['probability'] * 100
+                message += f"""**{i}. {star['symbol']}** 🚀
+💰 Цена: ${star['price']:.8f}
+🎯 Вероятность: {probability_pct:.1f}%
+📈 Потенциал: {'🔥' * min(5, int(probability_pct / 20))}
+
+"""
+            
+            message += f"\n⏰ **Время анализа:** {datetime.now().strftime('%H:%M:%S')}"
+            
+        else:
+            message = f"""🚀 **Поиск стреляющих монет завершен**
+
+📊 **Проанализировано:** {analyzed_count} монет
+🎯 **Стреляющих не найдено**
+
+ℹ️ В данный момент нет монет с высокой вероятностью резкого роста.
+Попробуйте позже или используйте обычный анализ монет.
+"""
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu_shooting_stars")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup)
+        
+        logger.info(f"✅ Поиск стреляющих монет завершен: найдено {len(shooting_stars)} из {analyzed_count}")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка поиска стреляющих монет: {e}")
+        await query.edit_message_text(f"❌ Ошибка поиска стреляющих монет: {str(e)}")
+
+def prepare_lstm_features(df):
+    """Подготовка признаков для LSTM модели"""
+    try:
+        # Простая подготовка признаков (можно улучшить)
+        features = []
+        
+        for i in range(10, len(df)):
+            row_features = []
+            
+            # Цена и объем
+            row_features.extend([
+                df['close'].iloc[i],
+                df['volume'].iloc[i],
+                df['high'].iloc[i] - df['low'].iloc[i],  # волатильность
+            ])
+            
+            # Простые технические индикаторы
+            close_prices = df['close'].iloc[i-10:i+1]
+            
+            # RSI (упрощенный)
+            if len(close_prices) > 1:
+                price_change = (close_prices.iloc[-1] - close_prices.iloc[0]) / close_prices.iloc[0]
+                row_features.append(price_change)
+            else:
+                row_features.append(0)
+            
+            # Средняя цена за период
+            row_features.append(close_prices.mean())
+            
+            # Максимум и минимум
+            row_features.extend([close_prices.max(), close_prices.min()])
+            
+            features.append(row_features)
+        
+        if not features:
+            return None
+            
+        return np.array(features)
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка подготовки LSTM признаков: {e}")
+        return None
 
 async def handle_auto_start(query, context):
     """Обработка запуска авто сигналов"""
@@ -1007,10 +1238,10 @@ async def send_auto_signals():
             logger.info("ℹ️ Нет сигналов для отправки")
             return
         
-        # Фильтруем только LONG сигналы и сортируем по силе
-        long_signals = []
+        # Фильтруем LONG и SHORT сигналы и сортируем по силе
+        trading_signals = []
         for coin, signal_data in all_signals:
-            if signal_data.get('signal_type') == '🟢 LONG':
+            if signal_data.get('signal_type') in ['🟢 LONG', '🔴 SHORT']:
                 # Извлекаем силу сигнала из strength_text
                 strength_text = signal_data.get('strength_text', '')
                 if 'Рост' in strength_text:
@@ -1020,23 +1251,35 @@ async def send_auto_signals():
                         signal_data['signal_strength'] = strength
                     except:
                         signal_data['signal_strength'] = 0.5  # По умолчанию для LONG
+                elif 'Падение' in strength_text:
+                    try:
+                        # Извлекаем процент из текста "Падение 45.2%"
+                        strength = float(strength_text.split('Падение ')[1].replace('%', '')) / 100
+                        signal_data['signal_strength'] = strength
+                    except:
+                        signal_data['signal_strength'] = 0.5  # По умолчанию для SHORT
                 else:
                     signal_data['signal_strength'] = 0.5
                 
-                long_signals.append((coin, signal_data))
+                trading_signals.append((coin, signal_data))
         
         # Сортируем по силе сигнала
-        long_signals.sort(key=lambda x: x[1].get('signal_strength', 0), reverse=True)
+        trading_signals.sort(key=lambda x: x[1].get('signal_strength', 0), reverse=True)
         
-        if long_signals:
+        if trading_signals:
             # Берем топ-5 лучших сигналов
-            top_signals = long_signals[:5]
+            top_signals = trading_signals[:5]
             
             # Создаем сообщение с топ-5 сигналами
+            # Подсчитываем LONG и SHORT сигналы
+            long_count = sum(1 for _, data in trading_signals if data.get('signal_type') == '🟢 LONG')
+            short_count = sum(1 for _, data in trading_signals if data.get('signal_type') == '🔴 SHORT')
+            
             message = f"""🤖 **АВТОМАТИЧЕСКИЕ СИГНАЛЫ**
 ⏰ **Время:** {datetime.now().strftime('%H:%M:%S')}
 📊 **Проанализировано:** {analyzed_count} монет (из {len(available_pairs)})
-🎯 **Найдено LONG сигналов:** {len(long_signals)}
+🟢 **LONG сигналов:** {long_count}
+🔴 **SHORT сигналов:** {short_count}
 
 **🏆 ТОП-{len(top_signals)} ЛУЧШИХ СИГНАЛОВ:**
 
@@ -1044,7 +1287,11 @@ async def send_auto_signals():
             
             for i, (coin, signal_data) in enumerate(top_signals, 1):
                 strength = signal_data.get('signal_strength', 0.7)
-                message += f"""**{i}. {coin}** 🟢 LONG
+                signal_type = signal_data.get('signal_type', '⚪ ОЖИДАНИЕ')
+                signal_emoji = "🟢" if "LONG" in signal_type else "🔴" if "SHORT" in signal_type else "⚪"
+                signal_name = "LONG" if "LONG" in signal_type else "SHORT" if "SHORT" in signal_type else "ОЖИДАНИЕ"
+                
+                message += f"""**{i}. {coin}** {signal_emoji} {signal_name}
 💰 Цена: ${signal_data['entry_price']:.8f}
 📈 Сила: {strength*100:.1f}%
 📊 RSI: {signal_data['rsi']:.1f}
@@ -1059,15 +1306,16 @@ async def send_auto_signals():
                 text=message
             )
             
-            logger.info(f"✅ Автосигналы отправлены: топ-{len(top_signals)} из {len(long_signals)} LONG сигналов")
+            logger.info(f"✅ Автосигналы отправлены: топ-{len(top_signals)} из {len(trading_signals)} торговых сигналов")
         else:
-            # Если нет LONG сигналов, показываем статистику
+            # Если нет торговых сигналов, показываем статистику
             message = f"""🤖 **АВТОМАТИЧЕСКИЕ СИГНАЛЫ**
 ⏰ **Время:** {datetime.now().strftime('%H:%M:%S')}
 📊 **Проанализировано:** {analyzed_count} монет (из {len(available_pairs)})
-🎯 **LONG сигналов:** 0
+🟢 **LONG сигналов:** 0
+🔴 **SHORT сигналов:** 0
 
-ℹ️ В данный момент нет сильных LONG сигналов.
+ℹ️ В данный момент нет сильных торговых сигналов.
 Попробуйте позже или используйте /analyze для анализа конкретной монеты.
             """
             

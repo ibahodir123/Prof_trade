@@ -3,8 +3,8 @@
   "chat_id": "6916749969",
   "binance_api": {
     "enabled": false,
-    "api_key": "",
-    "secret_key": ""
+    "api_key": "RZ0eHGS8snfTOhcMNiqyDauYfO3cOP6n98M0JYQwBmF9uxlzhgkvhd0af2KMgWnt",
+    "secret_key": "vLl2nXCANtF3bHlzupcYHx17005b9QpOK13JbhhLKKFf9WqUMaPFhaUucEjxrQ2P"
   },
   "ml_settings": {
     "sequence_length": 12,

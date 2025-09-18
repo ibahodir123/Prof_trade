@@ -441,8 +441,8 @@
     "last_update": "2025-09-12T17:21:44.969487"
   },
   "binance_api": {
-    "api_key": "RZ0eHGS8snfTOhcMNiqyDauYfO3cOP6n98M0JYQwBmF9uxlzhgkvhd0af2KMgWnt",
-    "secret_key": "vLl2nXCANtF3bHlzupcYHx17005b9QpOK13JbhhLKKFf9WqUMaPFhaUucEjxrQ2P",
+    "api_key": "",
+    "secret_key": "",
     "enabled": false,
     "description": "API ключи для Binance (опционально)",
     "instructions": {

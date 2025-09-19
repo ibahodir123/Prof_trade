@@ -23,7 +23,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
-        logging.FileHandler('auto_signals.log'),
+        logging.FileHandler('auto_signals.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -61,6 +61,10 @@ class AutoSignalsBot:
                 'secret': self.config['binance_api']['secret_key'],
                 'sandbox': False,
                 'enableRateLimit': True,
+                'options': {
+                    'adjustForTimeDifference': True,
+                    'recvWindow': 60000,  # Увеличиваем окно приема
+                }
             })
             logger.info("✅ Binance API инициализирован")
         except Exception as e:
@@ -97,32 +101,40 @@ class AutoSignalsBot:
     
     async def get_available_pairs(self):
         """Получение списка доступных торговых пар"""
-        try:
-            if not self.binance:
-                self.initialize_binance()
-            
-            markets = self.binance.load_markets()
-            usdt_pairs = []
-            
-            for symbol, market in markets.items():
-                if market['quote'] == 'USDT' and market['active']:
-                    # Проверяем объем торгов за 24ч
-                    try:
-                        ticker = self.binance.fetch_ticker(symbol)
-                        volume_24h = ticker['quoteVolume']
-                        
-                        if volume_24h and volume_24h >= self.config['trading_settings']['min_volume_24h']:
-                            usdt_pairs.append(symbol)
-                    except:
-                        continue
-            
-            self.available_pairs = usdt_pairs
-            logger.info(f"✅ Найдено {len(usdt_pairs)} активных USDT пар")
-            return usdt_pairs
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка получения торговых пар: {e}")
-            return []
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if not self.binance:
+                    self.initialize_binance()
+                
+                # Синхронизируем время перед запросом
+                await asyncio.sleep(1)
+                
+                markets = self.binance.load_markets()
+                usdt_pairs = []
+                
+                # Берем только популярные пары для автосигналов
+                popular_pairs = [
+                    'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT',
+                    'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT',
+                    'LTC/USDT', 'LINK/USDT', 'UNI/USDT', 'ATOM/USDT', 'FIL/USDT'
+                ]
+                
+                for symbol in popular_pairs:
+                    if symbol in markets and markets[symbol]['active']:
+                        usdt_pairs.append(symbol)
+                
+                self.available_pairs = usdt_pairs
+                logger.info(f"✅ Найдено {len(usdt_pairs)} активных USDT пар")
+                return usdt_pairs
+                
+            except Exception as e:
+                logger.warning(f"Попытка {attempt + 1} неудачна: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)  # Пауза перед повторной попыткой
+                else:
+                    logger.error(f"Ошибка получения торговых пар после {max_retries} попыток: {e}")
+                    return []
     
     def calculate_dynamic_percentages(self, signal_strength, signal_type):
         """Расчет динамических процентов на основе силы сигнала"""
@@ -281,7 +293,7 @@ class AutoSignalsBot:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, data=data)
                 if response.status_code == 200:
-                    logger.info("✅ Сообщение отправлено в Telegram")
+                    logger.info("Сообщение отправлено в Telegram")
                 else:
                     logger.error(f"❌ Ошибка отправки в Telegram: {response.status_code}")
                     
@@ -298,7 +310,7 @@ class AutoSignalsBot:
                 await self.get_available_pairs()
             
             coins_to_check = self.available_pairs
-            logger.info(f"📊 Анализирую {len(coins_to_check)} монет для автосигналов")
+            logger.info(f"Анализирую {len(coins_to_check)} монет для автосигналов")
             
             all_signals = []
             analyzed_count = 0
@@ -363,7 +375,7 @@ class AutoSignalsBot:
             
             # Отправляем сообщение
             await self.send_telegram_message(message)
-            logger.info(f"✅ Автосигналы отправлены: {len(top_long)} LONG, {len(top_short)} SHORT")
+            logger.info(f"Автосигналы отправлены: {len(top_long)} LONG, {len(top_short)} SHORT")
             
         except Exception as e:
             logger.error(f"❌ Ошибка отправки автосигналов: {e}")

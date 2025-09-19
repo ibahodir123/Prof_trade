@@ -5,6 +5,7 @@ Binance Telegram бот для ML сигналов
 """
 import asyncio
 import logging
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 import json
@@ -15,6 +16,9 @@ import joblib
 from datetime import datetime
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+from advanced_ema_analyzer import AdvancedEMAAnalyzer
+from advanced_ml_trainer import AdvancedMLTrainer
+from shooting_star_predictor import ShootingStarPredictor
 
 # Настройка matplotlib для работы без GUI
 import matplotlib
@@ -235,17 +239,29 @@ def prepare_ml_features(df):
         logger.error(f"❌ Ошибка подготовки признаков: {e}")
         return None
 
-def analyze_coin_signal_ema(symbol):
-    """Анализ монеты с использованием EMA паттернов"""
+def analyze_coin_signal_advanced_ema(symbol):
+    """Анализ монеты с использованием продвинутой EMA логики"""
+    global ema_analyzer, ml_trainer
+    
     try:
         # Очищаем символ от дублирования USDT
         clean_symbol = symbol.replace(':USDT', '') if ':USDT' in symbol else symbol
         
-        # Получение данных с Binance
-        logger.info(f"📊 Получаю данные {symbol} с Binance для EMA анализа...")
-        df = get_binance_data(symbol, timeframe='1h', limit=500)
+        # Инициализация анализаторов
+        if ema_analyzer is None:
+            ema_analyzer = AdvancedEMAAnalyzer()
         
-        if df is None or df.empty:
+        if ml_trainer is None:
+            ml_trainer = AdvancedMLTrainer()
+            ml_trainer.load_models()  # Загружаем обученные модели
+        
+        logger.info(f"📊 Анализирую {symbol} с продвинутой EMA логикой...")
+        
+        # Получаем данные через Binance API
+        exchange = ccxt.binance()
+        ohlcv_data = exchange.fetch_ohlcv(symbol, '1h', limit=500)
+        
+        if not ohlcv_data:
             logger.error(f"❌ Нет данных для {symbol}")
             return {
                 'symbol': clean_symbol,
@@ -260,55 +276,14 @@ def analyze_coin_signal_ema(symbol):
                 'error': f"Монета {clean_symbol} не найдена на Binance"
             }
         
-        # Инициализируем EMA анализатор
-        ema_analyzer = EMAPatternAnalyzer()
+        # Анализ с продвинутой EMA логикой и ML
+        ema_analysis = ema_analyzer.analyze_coin(symbol, ohlcv_data, ml_trainer)
         
-        # Анализируем EMA паттерны
-        logger.info(f"🔍 Анализирую EMA паттерны для {symbol}...")
+        # Получение текущей цены
+        current_price = ema_analysis.get('current_price', 0)
         
-        # Конвертируем DataFrame в формат OHLCV для анализатора
-        ohlcv_data = []
-        for timestamp, row in df.iterrows():
-            ohlcv_data.append([
-                int(timestamp.timestamp() * 1000),  # Конвертируем в миллисекунды
-                float(row['open']),
-                float(row['high']),
-                float(row['low']),
-                float(row['close']),
-                float(row['volume'])
-            ])
-        
-        ema_analysis = ema_analyzer.analyze_coin(symbol, ohlcv_data)
-        
-        if 'error' in ema_analysis:
-            logger.error(f"❌ Ошибка EMA анализа {symbol}: {ema_analysis['error']}")
-            return {
-                'symbol': clean_symbol,
-                'signal_type': "❌ ОШИБКА АНАЛИЗА",
-                'strength_text': f"Ошибка EMA анализа: {ema_analysis['error']}",
-                'entry_price': None,
-                'take_profit': None,
-                'stop_loss': None,
-                'rsi': None,
-                'ml_status': "Ошибка",
-                'df': df,
-                'error': ema_analysis['error']
-            }
-        
-        # Извлекаем результаты анализа
-        trend = ema_analysis.get('trend', 'НЕИЗВЕСТНО')
-        signal_type = ema_analysis.get('signal_type', 'ОЖИДАНИЕ')
-        confidence = ema_analysis.get('confidence', 0)
-        
-        logger.info(f"📊 EMA анализ {symbol}:")
-        logger.info(f"   Тренд: {trend}")
-        logger.info(f"   Сигнал: {signal_type}")
-        logger.info(f"   Уверенность: {confidence}%")
-        
-        # Получаем цену входа
-        entry_price = ema_analysis.get('current_price', df['close'].iloc[-1])
-        
-        # Расчет RSI для совместимости
+        # Расчет RSI
+        df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -316,35 +291,49 @@ def analyze_coin_signal_ema(symbol):
         rsi = 100 - (100 / (1 + rs))
         current_rsi = rsi.iloc[-1] if not rsi.empty else 50
         
-        # Формируем результат
-        result = {
+        # Получаем данные из EMA анализа
+        signal_type = ema_analysis.get('signal', 'ОЖИДАНИЕ')
+        confidence = ema_analysis.get('confidence', 50.0)
+        entry_prob = ema_analysis.get('ml_entry_prob', 0.0)
+        exit_prob = ema_analysis.get('ml_exit_prob', 0.0)
+        trend_name = ema_analysis.get('trend_name', 'Не определен')
+        phase_name = ema_analysis.get('phase_name', 'Не определена')
+        
+        # Расчет силы сигнала на основе EMA анализа и ML
+        strength = confidence / 100.0  # Конвертируем проценты в десятичные дроби
+        
+        # Расчет динамических процентов
+        profit_pct, stop_pct, strength_text = calculate_dynamic_percentages(strength, signal_type)
+        
+        # Расчет цен входа, тейк-профита и стоп-лосса
+        entry_price = current_price
+        take_profit = entry_price * (1 + profit_pct) if signal_type == 'LONG' else entry_price * (1 - profit_pct)
+        stop_loss = entry_price * (1 - stop_pct) if signal_type == 'LONG' else entry_price * (1 + stop_pct)
+        
+        return {
             'symbol': clean_symbol,
             'signal_type': signal_type,
-            'strength_text': f"EMA {trend} тренд",
+            'strength_text': f"{strength*100:.1f}%",
             'entry_price': entry_price,
-            'take_profit': None,
-            'stop_loss': None,
+            'take_profit': take_profit,
+            'stop_loss': stop_loss,
             'rsi': current_rsi,
-            'ml_status': "EMA Активна",
+            'ml_status': f"EMA+ML (вход:{entry_prob:.2f}, выход:{exit_prob:.2f})",
             'df': df,
-            'ema_analysis': {
-                'trend': trend,
-                'confidence': confidence,
-                'ema20': ema_analysis.get('ema20'),
-                'ema50': ema_analysis.get('ema50'),
-                'ema100': ema_analysis.get('ema100')
-            }
+            'ema_analysis': ema_analysis,
+            'entry_prob': entry_prob,
+            'exit_prob': exit_prob,
+            'trend_type': ema_analysis.get('trend_type', 'неопределен'),
+            'market_phase': ema_analysis.get('market_phase', 'неопределена'),
+            'trend_angle': ema_analysis.get('trend_angle', 0)
         }
         
-        logger.info(f"✅ EMA анализ {symbol} завершен: {signal_type}")
-        return result
-        
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка EMA анализа {symbol}: {e}")
+        logger.error(f"Ошибка продвинутого EMA анализа {symbol}: {e}")
         return {
-            'symbol': clean_symbol if 'clean_symbol' in locals() else symbol,
-            'signal_type': "❌ ОШИБКА",
-            'strength_text': f"Критическая ошибка: {str(e)}",
+            'symbol': clean_symbol,
+            'signal_type': "ОШИБКА",
+            'strength_text': f"Ошибка анализа: {str(e)}",
             'entry_price': None,
             'take_profit': None,
             'stop_loss': None,
@@ -659,6 +648,11 @@ available_pairs = []
 config = None
 application = None
 
+# Новые анализаторы
+ema_analyzer = None
+ml_trainer = None
+shooting_predictor = None
+
 def create_advanced_trading_chart(symbol, df, signal_data):
     """Создание продвинутого графика в стиле TradingView"""
     try:
@@ -806,6 +800,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔍 Поиск монет", callback_data="menu_search")],
         [InlineKeyboardButton("🚀 Стреляющие монеты", callback_data="menu_shooting_stars")],
         [InlineKeyboardButton("📈 EMA Анализ", callback_data="menu_ema_analysis")],
+        [InlineKeyboardButton("🧠 Обучение ML", callback_data="menu_train_ml")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -844,12 +839,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_shooting_stars_menu(query, context)
         elif query.data == "menu_ema_analysis":
             await handle_ema_analysis_menu(query, context)
+        elif query.data == "menu_train_ml":
+            await handle_train_ml_menu(query, context)
         elif query.data.startswith("select_"):
             await handle_coin_selection(query, context)
         elif query.data == "find_shooting_stars":
             await handle_find_shooting_stars(query, context)
         elif query.data == "train_ema_models":
             await handle_train_ema_models(query, context)
+        elif query.data == "start_ml_training":
+            await handle_start_ml_training(query, context)
+        elif query.data == "ml_models_status":
+            await handle_ml_models_status(query, context)
         elif query.data == "ema_analyze_coin":
             await handle_ema_analyze_coin(query, context)
         elif query.data.startswith("ema_analyze_"):
@@ -922,7 +923,7 @@ async def handle_coins_menu(query, context):
 async def handle_signals_menu_new(query, context):
     """Обработка кнопки Последние сигналы (новая версия - отправляет новое сообщение)"""
     try:
-        signal_data = analyze_coin_signal(current_coin)
+        signal_data = analyze_coin_signal_advanced_ema(current_coin)
         if not signal_data:
             await query.message.reply_text(f"❌ Ошибка анализа {current_coin}")
             return
@@ -1050,78 +1051,38 @@ async def handle_coin_selection(query, context):
     await handle_signals_menu_new(query, context)
 
 async def handle_find_shooting_stars(query, context):
-    """Поиск стреляющих монет с помощью LSTM модели"""
+    """Поиск стреляющих монет с помощью продвинутого анализа"""
+    global shooting_predictor
+    
     try:
+        # Инициализируем предиктор если еще не инициализирован
+        if shooting_predictor is None:
+            shooting_predictor = ShootingStarPredictor()
+        
         # Отправляем сообщение о начале анализа
         await query.edit_message_text("🔮 **Поиск стреляющих монет...**\n\n⏳ Анализирую все монеты на Binance...")
         
         # Получаем список всех монет
         available_pairs = await get_available_pairs()
         
+        # Проверяем, что список не пустой
+        if not available_pairs:
+            await query.edit_message_text("❌ Не удалось получить список монет с Binance")
+            return
+        
         # Ограничиваем анализ первыми 50 монетами для скорости
         pairs_to_analyze = available_pairs[:50]
         
         logger.info(f"🚀 Начинаю поиск стреляющих монет среди {len(pairs_to_analyze)} монет")
         
-        shooting_stars = []
-        analyzed_count = 0
-        
-        for symbol in pairs_to_analyze:
-            try:
-                # Получаем данные для анализа
-                df = get_binance_data(symbol, '1h', 100)
-                if df is None or len(df) < 50:
-                    continue
-                
-                # Загружаем LSTM модель
-                try:
-                    model = load_model('simple_shooting_star_model.h5')
-                    scaler = joblib.load('simple_shooting_star_scaler.pkl')
-                    
-                    # Подготавливаем данные для LSTM
-                    features = prepare_lstm_features(df)
-                    if features is None:
-                        continue
-                    
-                    # Нормализуем данные
-                    features_scaled = scaler.transform(features)
-                    
-                    # Делаем предсказание
-                    prediction = model.predict(features_scaled[-1:].reshape(1, -1, features_scaled.shape[1]))
-                    shooting_probability = prediction[0][0]
-                    
-                    # Если вероятность высокая, добавляем в список
-                    if shooting_probability > 0.7:
-                        current_price = df['close'].iloc[-1]
-                        shooting_stars.append({
-                            'symbol': symbol,
-                            'probability': shooting_probability,
-                            'price': current_price
-                        })
-                    
-                except Exception as e:
-                    logger.error(f"❌ Ошибка LSTM анализа для {symbol}: {e}")
-                    continue
-                
-                analyzed_count += 1
-                
-                # Обновляем прогресс каждые 10 монет
-                if analyzed_count % 10 == 0:
-                    progress_msg = f"🔮 **Поиск стреляющих монет...**\n\n📊 Проанализировано: {analyzed_count}/{len(pairs_to_analyze)}\n🎯 Найдено стреляющих: {len(shooting_stars)}"
-                    await query.edit_message_text(progress_msg)
-                
-            except Exception as e:
-                logger.error(f"❌ Ошибка анализа {symbol}: {e}")
-                continue
-        
-        # Сортируем по вероятности
-        shooting_stars.sort(key=lambda x: x['probability'], reverse=True)
+        # Используем предиктор для поиска стреляющих звезд
+        shooting_stars = shooting_predictor.find_shooting_stars(pairs_to_analyze, min_probability=0.4)
         
         # Формируем результат
         if shooting_stars:
             message = f"""🚀 **СТРЕЛЯЮЩИЕ МОНЕТЫ НАЙДЕНЫ!**
 
-📊 **Проанализировано:** {analyzed_count} монет
+📊 **Проанализировано:** {len(pairs_to_analyze)} монет
 🎯 **Найдено стреляющих:** {len(shooting_stars)}
 
 **🏆 ТОП-{min(10, len(shooting_stars))} СТРЕЛЯЮЩИХ МОНЕТ:**
@@ -1131,9 +1092,10 @@ async def handle_find_shooting_stars(query, context):
             for i, star in enumerate(shooting_stars[:10], 1):
                 probability_pct = star['probability'] * 100
                 message += f"""**{i}. {star['symbol']}** 🚀
-💰 Цена: ${star['price']:.8f}
+💰 Цена: ${star['current_price']:.8f}
 🎯 Вероятность: {probability_pct:.1f}%
 📈 Потенциал: {'🔥' * min(5, int(probability_pct / 20))}
+📊 Прогноз: {star['predicted_change']}
 
 """
             
@@ -1142,7 +1104,7 @@ async def handle_find_shooting_stars(query, context):
         else:
             message = f"""🚀 **Поиск стреляющих монет завершен**
 
-📊 **Проанализировано:** {analyzed_count} монет
+📊 **Проанализировано:** {len(pairs_to_analyze)} монет
 🎯 **Стреляющих не найдено**
 
 ℹ️ В данный момент нет монет с высокой вероятностью резкого роста.
@@ -1154,7 +1116,7 @@ async def handle_find_shooting_stars(query, context):
         
         await query.edit_message_text(message, reply_markup=reply_markup)
         
-        logger.info(f"✅ Поиск стреляющих монет завершен: найдено {len(shooting_stars)} из {analyzed_count}")
+        logger.info(f"✅ Поиск стреляющих монет завершен: найдено {len(shooting_stars)} из {len(pairs_to_analyze)}")
         
     except Exception as e:
         logger.error(f"❌ Ошибка поиска стреляющих монет: {e}")
@@ -1200,7 +1162,7 @@ async def handle_train_ema_models(query, context):
         await query.edit_message_text("🤖 Обучаю EMA модели на исторических данных...")
         
         # Инициализируем тренер
-        trainer = EMATrendTrainer()
+        trainer = AdvancedMLTrainer()
         
         # Список символов для обучения
         symbols = [
@@ -1218,14 +1180,13 @@ async def handle_train_ema_models(query, context):
         
         # Обучаем модели
         await query.edit_message_text("🤖 Обучаю EMA модели...")
-        models = trainer.train_ema_models(historical_data)
+        success = trainer.train_models(symbols)
         
-        if models:
+        if success:
             message = f"✅ **EMA МОДЕЛИ ОБУЧЕНЫ!**\n\n"
-            message += f"📊 Обучено моделей: {len(models)}\n"
-            message += f"📈 Символов в обучении: {len(historical_data)}\n"
-            message += f"📅 Данные с: 1 января 2025\n\n"
-            message += "🎯 Модели готовы к использованию!"
+            message += f"📊 Моделей: 2 (вход и выход)\n"
+            message += f"📈 Символов: {len(symbols)}\n"
+            message += "🚀 Готово к использованию!"
             
             await query.edit_message_text(message, parse_mode='Markdown')
         else:
@@ -1234,6 +1195,43 @@ async def handle_train_ema_models(query, context):
     except Exception as e:
         logger.error(f"❌ Ошибка обучения EMA моделей: {e}")
         await query.edit_message_text("❌ Ошибка обучения EMA моделей")
+
+async def handle_train_ml_menu(query, context):
+    """Меню обучения ML моделей"""
+    try:
+        await query.answer()
+        
+        keyboard = [
+            [InlineKeyboardButton("🚀 Начать обучение", callback_data="start_ml_training")],
+            [InlineKeyboardButton("📊 Статус моделей", callback_data="ml_models_status")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="start")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        message = """🧠 **ОБУЧЕНИЕ ML МОДЕЛЕЙ**
+
+🎯 **Универсальная EMA логика для всех трендов:**
+• Скорости EMA линий (20, 50, 100)
+• Скорость цены относительно EMA
+• Расстояния между EMA и ценой
+• Углы тренда (-90° до +90°)
+• Импульсы и коррекции
+
+📈 **Обучение на данных с 1 января 2025:**
+• **Нисходящий тренд:** максимальные расстояния = LONG вход, минимальные = выход
+• **Восходящий тренд:** минимальные расстояния = LONG вход (приближение, пересечение, касание, отскок), максимальные = выход при максимуме импульса  
+• **Боковой тренд:** максимальные расстояния = LONG вход, минимальные = выход
+• Только LONG сигналы
+• RandomForest классификация
+
+⚡ **Результат:** Точные предсказания точек входа/выхода
+"""
+        
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка ML меню: {e}")
+        await query.edit_message_text("❌ Ошибка отображения меню")
 
 async def handle_ema_analyze_coin(query, context):
     """EMA анализ конкретной монеты"""
@@ -1277,7 +1275,7 @@ async def handle_ema_coin_analysis(query, context, symbol):
         await query.edit_message_text(f"📊 Анализирую {symbol} с помощью EMA...")
         
         # Выполняем EMA анализ
-        signal_data = analyze_coin_signal_ema(symbol)
+        signal_data = analyze_coin_signal_advanced_ema(symbol)
         
         if signal_data.get('error'):
             await query.edit_message_text(f"❌ Ошибка анализа {symbol}: {signal_data['error']}")
@@ -1292,9 +1290,9 @@ async def handle_ema_coin_analysis(query, context, symbol):
 📝 Обоснование: {signal_data['strength_text']}
 
 📊 EMA Данные:
-• Тренд: {ema_analysis.get('trend', 'Не определен')}
-• Фаза: {ema_analysis.get('phase', 'Не определена')}
-• Уверенность: {ema_analysis.get('confidence', 0)*100:.1f}%
+• Тренд: {ema_analysis.get('trend_name', 'Не определен')}
+• Фаза: {ema_analysis.get('phase_name', 'Не определена')}
+• Уверенность: {ema_analysis.get('confidence', 0):.1f}%
 
 💰 Цена входа: ${signal_data['entry_price']:.8f}
 """
@@ -1448,7 +1446,7 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_text(f"🔍 Анализирую {current_coin}...")
         
-        signal_data = analyze_coin_signal(current_coin)
+        signal_data = analyze_coin_signal_advanced_ema(current_coin)
         if not signal_data:
             await update.message.reply_text(f"❌ Ошибка анализа {current_coin}")
             return
@@ -1596,6 +1594,90 @@ async def test_binance_command(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"❌ Ошибка тестирования Binance: {e}")
         await update.message.reply_text(f"❌ Ошибка Binance: {str(e)}")
+
+async def handle_start_ml_training(query, context):
+    """Начало обучения ML моделей"""
+    try:
+        await query.answer()
+        await query.edit_message_text("🚀 Начинаю обучение ML моделей на EMA данных...")
+        
+        # Инициализируем тренер
+        trainer = AdvancedMLTrainer()
+        
+        # Список символов для обучения
+        symbols = [
+            'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT',
+            'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT'
+        ]
+        
+        # Обучение моделей
+        success = trainer.train_models(symbols)
+        
+        if success:
+            message = """✅ **ML МОДЕЛИ ОБУЧЕНЫ!**
+
+🎯 Модели точек входа и выхода готовы
+📊 Обучены на EMA признаках
+🚀 Готово к использованию!"""
+            await query.edit_message_text(message, parse_mode='Markdown')
+        else:
+            await query.edit_message_text("❌ Ошибка обучения ML моделей")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка обучения ML: {e}")
+        await query.edit_message_text(f"❌ Ошибка обучения: {str(e)}")
+
+async def handle_ml_models_status(query, context):
+    """Статус ML моделей"""
+    try:
+        await query.answer()
+        
+        trainer = AdvancedMLTrainer()
+        
+        # Проверяем наличие моделей
+        models_exist = (
+            os.path.exists('models/entry_model.pkl') and
+            os.path.exists('models/exit_model.pkl') and
+            os.path.exists('models/ema_scaler.pkl')
+        )
+        
+        if models_exist:
+            # Пытаемся загрузить модели
+            try:
+                trainer.load_models()
+                message = """✅ **ML МОДЕЛИ ЗАГРУЖЕНЫ**
+
+🤖 **Доступные модели:**
+• Модель точек входа ✅
+• Модель точек выхода ✅
+• Нормализатор данных ✅
+
+📊 **Статус:** Готовы к предсказаниям
+🎯 **Логика:** EMA + ML анализ
+"""
+            except Exception as e:
+                message = f"""⚠️ **МОДЕЛИ НАЙДЕНЫ, НО ОШИБКА ЗАГРУЗКИ**
+
+❌ **Ошибка:** {str(e)}
+
+🔄 **Рекомендация:** Переобучите модели
+"""
+        else:
+            message = """❌ **ML МОДЕЛИ НЕ НАЙДЕНЫ**
+
+📁 **Ожидаемые файлы:**
+• models/entry_model.pkl
+• models/exit_model.pkl
+• models/ema_scaler.pkl
+
+🚀 **Действие:** Начните обучение моделей
+"""
+        
+        await query.edit_message_text(message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка проверки статуса: {e}")
+        await query.edit_message_text(f"❌ Ошибка: {str(e)}")
 
 def main():
     """Основная функция"""

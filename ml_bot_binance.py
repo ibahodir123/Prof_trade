@@ -1204,12 +1204,12 @@ async def handle_train_ema_models(query, context):
         
         # Обучаем модели
         await query.edit_message_text("🤖 Обучаю EMA модели...")
-        models = trainer.train_ema_models(historical_data)
+        success = trainer.train_models(symbols)
         
-        if models:
+        if success:
             message = f"✅ **EMA МОДЕЛИ ОБУЧЕНЫ!**\n\n"
-            message += f"📊 Моделей: {len(models)}\n"
-            message += f"📈 Символов: {len(historical_data)}\n"
+            message += f"📊 Моделей: 2 (вход и выход)\n"
+            message += f"📈 Символов: {len(symbols)}\n"
             message += "🚀 Готово к использованию!"
             
             await query.edit_message_text(message, parse_mode='Markdown')

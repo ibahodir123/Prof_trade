@@ -15,13 +15,8 @@ import joblib
 from datetime import datetime
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-<<<<<<< Updated upstream
 from ema_pattern_analyzer import EMAPatternAnalyzer
 from ema_trend_trainer import EMATrendTrainer
-=======
-#from ema_pattern_analyzer import EMAPatternAnalyzer
-#from ema_trend_trainer import EMATrendTrainer
->>>>>>> Stashed changes
 
 # Настройка matplotlib для работы без GUI
 import matplotlib
@@ -272,7 +267,6 @@ def analyze_coin_signal_ema(symbol):
         
         # Анализируем EMA паттерны
         logger.info(f"🔍 Анализирую EMA паттерны для {symbol}...")
-<<<<<<< Updated upstream
         
         # Конвертируем DataFrame в формат OHLCV для анализатора
         ohlcv_data = []
@@ -287,9 +281,6 @@ def analyze_coin_signal_ema(symbol):
             ])
         
         ema_analysis = ema_analyzer.analyze_coin(symbol, ohlcv_data)
-=======
-        ema_analysis = ema_analyzer.analyze_ema_patterns(df)
->>>>>>> Stashed changes
         
         if 'error' in ema_analysis:
             logger.error(f"❌ Ошибка EMA анализа {symbol}: {ema_analysis['error']}")
@@ -307,7 +298,6 @@ def analyze_coin_signal_ema(symbol):
             }
         
         # Извлекаем результаты анализа
-<<<<<<< Updated upstream
         trend = ema_analysis.get('trend', 'НЕИЗВЕСТНО')
         signal_type = ema_analysis.get('signal_type', 'ОЖИДАНИЕ')
         confidence = ema_analysis.get('confidence', 0)
@@ -319,20 +309,6 @@ def analyze_coin_signal_ema(symbol):
         
         # Получаем цену входа
         entry_price = ema_analysis.get('current_price', df['close'].iloc[-1])
-=======
-        trend = ema_analysis['trend']
-        phase = ema_analysis['phase']
-        signal = ema_analysis['signal']
-        levels = ema_analysis['levels']
-        
-        logger.info(f"📊 EMA анализ {symbol}:")
-        logger.info(f"   Тренд: {trend}")
-        logger.info(f"   Фаза: {phase}")
-        logger.info(f"   Сигнал: {signal['type']}")
-        
-        # Получаем цену входа
-        entry_price = df['close'].iloc[-1]
->>>>>>> Stashed changes
         
         # Расчет RSI для совместимости
         delta = df['close'].diff()
@@ -345,25 +321,16 @@ def analyze_coin_signal_ema(symbol):
         # Формируем результат
         result = {
             'symbol': clean_symbol,
-<<<<<<< Updated upstream
             'signal_type': signal_type,
             'strength_text': f"EMA {trend} тренд",
             'entry_price': entry_price,
             'take_profit': None,
             'stop_loss': None,
-=======
-            'signal_type': signal['type'],
-            'strength_text': signal['reason'],
-            'entry_price': entry_price,
-            'take_profit': signal.get('take_profit'),
-            'stop_loss': signal.get('stop_loss'),
->>>>>>> Stashed changes
             'rsi': current_rsi,
             'ml_status': "EMA Активна",
             'df': df,
             'ema_analysis': {
                 'trend': trend,
-<<<<<<< Updated upstream
                 'confidence': confidence,
                 'ema20': ema_analysis.get('ema20'),
                 'ema50': ema_analysis.get('ema50'),
@@ -372,15 +339,6 @@ def analyze_coin_signal_ema(symbol):
         }
         
         logger.info(f"✅ EMA анализ {symbol} завершен: {signal_type}")
-=======
-                'phase': phase,
-                'levels': levels,
-                'confidence': signal.get('confidence', 0.5)
-            }
-        }
-        
-        logger.info(f"✅ EMA анализ {symbol} завершен: {signal['type']}")
->>>>>>> Stashed changes
         return result
         
     except Exception as e:
@@ -595,11 +553,7 @@ def analyze_coin_signal(symbol):
                             
                     elif diff < -0.10:  # Минимальный детектор значительно выше
                         if min_prob > 0.3:
-<<<<<<< Updated upstream
                             signal_type = "🟢 LONG"
-=======
-                            signal_type = "�� LONG"
->>>>>>> Stashed changes
                             strength_text = f"Fallback ML: рост {min_prob*100:.1f}%"
                             profit_pct, loss_pct, _ = calculate_dynamic_percentages(min_prob, "LONG")
                             take_profit = entry_price * (1 + profit_pct)
@@ -612,11 +566,7 @@ def analyze_coin_signal(symbol):
                             take_profit = None
                             stop_loss = None
                             ml_status = "Fallback ML"
-<<<<<<< Updated upstream
                             logger.info(f"🎯 Fallback ML сигнал: ОЖИДАНИЕ (слабая уверенность в росте)")
-=======
-                            logger.info(f"�� Fallback ML сигнал: ОЖИДАНИЕ (слабая уверенность в росте)")
->>>>>>> Stashed changes
                             
                     else:  # Разница менее 10% - нет четкого сигнала
                         signal_type = "⚪ ОЖИДАНИЕ"
@@ -1224,7 +1174,7 @@ async def handle_ema_analysis_menu(query, context):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-    message = """📈 **EMA АНАЛИЗ**
+        message = """📈 **EMA АНАЛИЗ**
 
 🎯 **Возможности:**
 • Обучение моделей на EMA закономерностях
@@ -1329,7 +1279,6 @@ async def handle_ema_coin_analysis(query, context, symbol):
         await query.edit_message_text(f"📊 Анализирую {symbol} с помощью EMA...")
         
         # Выполняем EMA анализ
-<<<<<<< Updated upstream
         signal_data = analyze_coin_signal_ema(symbol)
         
         if signal_data.get('error'):
@@ -1371,52 +1320,6 @@ async def handle_ema_coin_analysis(query, context, symbol):
         message += f"\n📊 RSI: {signal_data['rsi']:.1f}"
         message += f"\n🤖 ML статус: {signal_data['ml_status']}"
         
-=======
-        def analyze_coin_signal_ema(self, symbol):
-            """EMA анализ монеты"""
-            try:
-                # Проверяем, есть ли EMA анализатор
-                if not hasattr(self, 'ema_analyzer') or self.ema_analyzer is None:
-                    return None
-                # Очищаем символ от дублирования USDT
-                clean_symbol = symbol.replace(':USDT', '') if ':USDT' in symbol else symbol
-        
-                # Получение данных с Binance
-                logger.info(f"� Получаю данные {symbol} с Binance для EMA анализа...")
-                df = get_binance_data(symbol, timeframe='1h', limit=500)
-        
-                if df is None or df.empty:
-                    logger.error(f"❌ Нет данных для {symbol}")
-                    return {
-                        'symbol': clean_symbol,
-                        'signal_type': "❌ МОНЕТА НЕ НАЙДЕНА",
-                        'strength_text': f"Монета {clean_symbol} не найдена на Binance",
-                        'entry_price': None,
-                        'take_profit': None,
-                        'stop_loss': None,
-                        'rsi': None,
-                        'ml_status': "Не найдена",
-                        'df': None,
-                        'error': f"Монета {clean_symbol} не найдена на Binance"
-                    }
-        
-                # Используем EMA анализатор из self
-                ema_analyzer = self.ema_analyzer
-        
-                # Анализируем EMA паттерны
-                logger.info(f"� Анализирую EMA паттерны для {symbol}...")
-                ema_analysis = ema_analyzer.analyze_ema_patterns(df)
-        
-                if 'error' in ema_analysis:
-                    logger.error(f"❌ Ошибка EMA анализа {symbol}: {ema_analysis['error']}")
-                    return {
-                        'symbol': clean_symbol,
-                        'signal_type': "❌ ОШИБКА АНАЛИЗА",
-                        'strength_text': f"Ошибка EMA анализа: {ema_analysis['error']}",
-                        'entry_price': None,
-                        'take_profit': None,
-                        'stop_loss': None,
->>>>>>> Stashed changes
         # Кнопка назад
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="ema_analyze_coin")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1718,7 +1621,7 @@ def main():
         print(f"✅ Загружено {len(available_pairs)} монет с Binance")
     except Exception as e:
         print(f"⚠️ Ошибка загрузки монет с Binance: {e}")
-        print("�� Использую стандартный список")
+        print("🔄 Использую стандартный список")
     
     # Создаем приложение
     application = Application.builder().token(config["telegram_token"]).build()

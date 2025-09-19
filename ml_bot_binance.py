@@ -276,8 +276,8 @@ def analyze_coin_signal_advanced_ema(symbol):
                 'error': f"Монета {clean_symbol} не найдена на Binance"
             }
         
-        # Анализ с продвинутой EMA логикой
-        ema_analysis = ema_analyzer.analyze_coin(symbol, ohlcv_data)
+        # Анализ с продвинутой EMA логикой и ML
+        ema_analysis = ema_analyzer.analyze_coin(symbol, ohlcv_data, ml_trainer)
         
         # Получение текущей цены
         current_price = ema_analysis.get('current_price', 0)
@@ -291,40 +291,16 @@ def analyze_coin_signal_advanced_ema(symbol):
         rsi = 100 - (100 / (1 + rs))
         current_rsi = rsi.iloc[-1] if not rsi.empty else 50
         
-        # Определение сигнала на основе EMA анализа
+        # Получаем данные из EMA анализа
         signal_type = ema_analysis.get('signal', 'ОЖИДАНИЕ')
-        
-        # ML предсказание (если модели загружены)
-        entry_prob = 0.0
-        exit_prob = 0.0
-        
-        if ml_trainer.entry_model is not None and ml_trainer.exit_model is not None:
-            # Подготавливаем признаки для ML
-            df_processed = ema_analyzer.calculate_ema_features(df)
-            feature_columns = [
-                'ema20_speed', 'ema50_speed', 'ema100_speed',
-                'price_speed_vs_ema20', 'price_speed_vs_ema50', 'price_speed_vs_ema100',
-                'ema20_to_ema50', 'ema50_to_ema100', 'ema20_to_ema100',
-                'price_to_ema20', 'price_to_ema50', 'price_to_ema100',
-                'trend_angle', 'trend_type', 'market_phase'
-            ]
-            
-            if all(col in df_processed.columns for col in feature_columns):
-                features = df_processed[feature_columns].iloc[-1].values
-                if len(features) > 0 and not np.isnan(features).any():
-                    entry_prob, exit_prob = ml_trainer.predict_entry_exit(features)
+        confidence = ema_analysis.get('confidence', 50.0)
+        entry_prob = ema_analysis.get('ml_entry_prob', 0.0)
+        exit_prob = ema_analysis.get('ml_exit_prob', 0.0)
+        trend_name = ema_analysis.get('trend_name', 'Не определен')
+        phase_name = ema_analysis.get('phase_name', 'Не определена')
         
         # Расчет силы сигнала на основе EMA анализа и ML
-        strength = 0.3  # Базовая сила
-        
-        if signal_type == 'LONG':
-            strength = 0.8 + (entry_prob * 0.2)  # EMA + ML
-        elif signal_type == 'ТЕЙК ПРОФИТ':
-            strength = 0.7 + (exit_prob * 0.3)   # EMA + ML
-        elif entry_prob > 0.6:
-            strength = 0.6 + (entry_prob * 0.3)  # Только ML
-        elif exit_prob > 0.6:
-            strength = 0.5 + (exit_prob * 0.3)   # Только ML
+        strength = confidence / 100.0  # Конвертируем проценты в десятичные дроби
         
         # Расчет динамических процентов
         profit_pct, stop_pct, strength_text = calculate_dynamic_percentages(strength, signal_type)
@@ -1314,9 +1290,9 @@ async def handle_ema_coin_analysis(query, context, symbol):
 📝 Обоснование: {signal_data['strength_text']}
 
 📊 EMA Данные:
-• Тренд: {ema_analysis.get('trend', 'Не определен')}
-• Фаза: {ema_analysis.get('phase', 'Не определена')}
-• Уверенность: {ema_analysis.get('confidence', 0)*100:.1f}%
+• Тренд: {ema_analysis.get('trend_name', 'Не определен')}
+• Фаза: {ema_analysis.get('phase_name', 'Не определена')}
+• Уверенность: {ema_analysis.get('confidence', 0):.1f}%
 
 💰 Цена входа: ${signal_data['entry_price']:.8f}
 """

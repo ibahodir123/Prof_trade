@@ -75,8 +75,8 @@ class AdvancedEMAAnalyzer:
         price_change = (df['close'].iloc[-1] - df['close'].iloc[-5]) / df['close'].iloc[-5]
         return 1 if abs(price_change) > 0.01 else 0
 
-    def analyze_coin(self, symbol: str, ohlcv_data: List) -> Dict[str, Any]:
-        """Анализ монеты с продвинутой EMA логикой"""
+    def analyze_coin(self, symbol: str, ohlcv_data: List, ml_trainer=None) -> Dict[str, Any]:
+        """Анализ монеты с продвинутой EMA логикой и ML"""
         try:
             df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df = self.calculate_ema_features(df)
@@ -85,21 +85,83 @@ class AdvancedEMAAnalyzer:
             trend_type = df['trend_type'].iloc[-1]
             market_phase = df['market_phase'].iloc[-1]
 
-            # Генерация сигнала
-            signal = self._generate_signal(df, trend_type, market_phase)
+            # Попытка использовать ML для более точного анализа
+            signal = 'ОЖИДАНИЕ'
+            confidence = 0.0
+            ml_entry_prob = 0.0
+            ml_exit_prob = 0.0
+            
+            if ml_trainer:
+                try:
+                    features = self.extract_ml_features(df)
+                    ml_entry_prob, ml_exit_prob = ml_trainer.predict_entry_exit(features)
+                    
+                    # Используем ML вероятности для принятия решения
+                    if ml_entry_prob > 0.7:  # Высокая вероятность входа
+                        signal = 'LONG'
+                        confidence = ml_entry_prob * 100
+                    elif ml_entry_prob > 0.5:  # Средняя вероятность
+                        signal = 'LONG'
+                        confidence = ml_entry_prob * 100
+                    else:
+                        signal = 'ОЖИДАНИЕ'
+                        confidence = (1 - ml_entry_prob) * 100
+                        
+                except Exception as ml_error:
+                    logger.warning(f"Ошибка ML анализа для {symbol}: {ml_error}")
+                    # Fallback к простой логике
+                    signal = self._generate_signal(df, trend_type, market_phase)
+                    confidence = 50.0
+            else:
+                # Простая логика без ML
+                signal = self._generate_signal(df, trend_type, market_phase)
+                confidence = 50.0
+
+            # Определяем тренд и фазу для отображения
+            trend_name = ['Ниcходящий', 'Боковой', 'Восходящий'][trend_type] if trend_type in [0, 1, 2] else 'Не определен'
+            phase_name = ['Коррекция', 'Импульс'][market_phase] if market_phase in [0, 1] else 'Не определена'
 
             return {
                 'symbol': symbol,
                 'current_price': current_price,
                 'signal': signal,
+                'confidence': confidence,
                 'trend_type': trend_type,
+                'trend_name': trend_name,
                 'market_phase': market_phase,
+                'phase_name': phase_name,
+                'ml_entry_prob': ml_entry_prob,
+                'ml_exit_prob': ml_exit_prob,
                 'df': df
             }
 
         except Exception as e:
             logger.error(f"Ошибка анализа {symbol}: {e}")
             return {'symbol': symbol, 'signal': 'ОШИБКА', 'error': str(e)}
+
+    def extract_ml_features(self, df: pd.DataFrame) -> np.ndarray:
+        """Извлечение признаков для ML модели (ровно 10 признаков)"""
+        if len(df) < 20:
+            return np.zeros(10)
+        
+        # Берем последние значения
+        latest = df.iloc[-1]
+        
+        # Создаем массив из 10 признаков
+        features = np.array([
+            latest['ema_20'],                    # 1. EMA 20
+            latest['ema_50'],                    # 2. EMA 50
+            latest['ema_100'],                   # 3. EMA 100
+            latest['ema20_speed'],               # 4. Скорость EMA 20
+            latest['ema50_speed'],               # 5. Скорость EMA 50
+            latest['price_speed_vs_ema20'],      # 6. Скорость цены vs EMA 20
+            latest['ema20_to_ema50'],            # 7. Расстояние EMA 20-50
+            latest['price_to_ema20'],            # 8. Расстояние цена-EMA 20
+            latest['trend_angle'],               # 9. Угол тренда
+            latest['trend_type']                 # 10. Тип тренда
+        ])
+        
+        return features
 
     def _generate_signal(self, df: pd.DataFrame, trend_type: int, market_phase: int) -> str:
         """Генерация торгового сигнала"""

@@ -380,7 +380,7 @@ class AutoSignalsBot:
             )
             
             self.scheduler.start()
-            logger.info("⏰ Планировщик автосигналов запущен (каждые 30 минут)")
+            logger.info("⏰ Планировщик аpkill -f "ml_bot_binance.py"втосигналов запущен (каждые 30 минут)")
             
         except Exception as e:
             logger.error(f"❌ Ошибка запуска планировщика: {e}")

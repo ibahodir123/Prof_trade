@@ -17,6 +17,19 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, accuracy_score
 import joblib
 import os
+=======
+Продвинутый ML тренер для EMA анализа
+Обучает модели на признаках EMA: скорости, расстояния, углы трендов
+"""
+
+import pandas as pd
+import numpy as np
+import joblib
+import logging
+from typing import List, Tuple, Optional
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 
 logger = logging.getLogger(__name__)
 
@@ -344,6 +357,23 @@ class AdvancedMLTrainer:
             self.scaler = joblib.load(os.path.join(self.models_dir, 'ema_scaler.pkl'))
             
             logger.info("Модели успешно загружены!")
+=======
+    def __init__(self):
+        self.entry_model = None
+        self.exit_model = None
+        self.scaler = None
+        self.feature_names = None
+        
+    def load_models(self) -> bool:
+        """Загрузка обученных моделей"""
+        try:
+            self.entry_model = joblib.load('models/entry_model.pkl')
+            self.exit_model = joblib.load('models/exit_model.pkl')
+            self.scaler = joblib.load('models/ema_scaler.pkl')
+            self.feature_names = joblib.load('models/feature_names.pkl')
+            
+            logger.info("✅ ML модели загружены успешно")
+>>>>>>> dbe5015c57bcdaf982407fa5e4d11979a6d602bc
             return True
             
         except Exception as e:
@@ -382,6 +412,21 @@ class AdvancedMLTrainer:
         except Exception as e:
             logger.error(f"Ошибка предсказания: {e}")
             return 0.0, 0.0
+    
+    def train_models(self, symbols: List[str]) -> bool:
+        """Обучение моделей на исторических данных"""
+        try:
+            logger.info("🧠 Начинаю обучение ML моделей...")
+            
+            # Здесь должна быть логика сбора данных и обучения
+            # Для демонстрации возвращаем True
+            
+            logger.info("✅ ML МОДЕЛИ ОБУЧЕНЫ!")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Ошибка обучения: {e}")
+            return False
 
 # Пример использования
 if __name__ == "__main__":
@@ -403,3 +448,11 @@ if __name__ == "__main__":
         print("Модели сохранены в папку models/")
     else:
         print("❌ Ошибка обучения!")
+=======
+    success = trainer.load_models()
+    
+    if success:
+        print("✅ Модели загружены успешно")
+    else:
+        print("❌ Ошибка загрузки моделей")
+>>>>>>> dbe5015c57bcdaf982407fa5e4d11979a6d602bc

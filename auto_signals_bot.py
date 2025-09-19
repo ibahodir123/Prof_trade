@@ -15,8 +15,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from ema_pattern_analyzer import EMAPatternAnalyzer
-from ema_trend_trainer import EMATrendTrainer
+#from ema_pattern_analyzer import EMAPatternAnalyzer
+#from ema_trend_trainer import EMATrendTrainer
 
 # Настройка логирования
 logging.basicConfig(

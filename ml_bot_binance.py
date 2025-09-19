@@ -15,7 +15,6 @@ import joblib
 from datetime import datetime
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from ema_trend_trainer import EMATrendTrainer
 
 # Настройка matplotlib для работы без GUI
 import matplotlib

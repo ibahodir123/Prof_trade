@@ -147,19 +147,25 @@ class AdvancedEMAAnalyzer:
         # Берем последние значения
         latest = df.iloc[-1]
         
-        # Создаем массив из 10 признаков
+        # Создаем массив из 10 признаков с проверкой на NaN
         features = np.array([
-            latest['ema_20'],                    # 1. EMA 20
-            latest['ema_50'],                    # 2. EMA 50
-            latest['ema_100'],                   # 3. EMA 100
-            latest['ema20_speed'],               # 4. Скорость EMA 20
-            latest['ema50_speed'],               # 5. Скорость EMA 50
-            latest['price_speed_vs_ema20'],      # 6. Скорость цены vs EMA 20
-            latest['ema20_to_ema50'],            # 7. Расстояние EMA 20-50
-            latest['price_to_ema20'],            # 8. Расстояние цена-EMA 20
-            latest['trend_angle'],               # 9. Угол тренда
-            latest['trend_type']                 # 10. Тип тренда
+            float(latest['ema_20']) if pd.notna(latest['ema_20']) else 0.0,                    # 1. EMA 20
+            float(latest['ema_50']) if pd.notna(latest['ema_50']) else 0.0,                    # 2. EMA 50
+            float(latest['ema_100']) if pd.notna(latest['ema_100']) else 0.0,                  # 3. EMA 100
+            float(latest['ema20_speed']) if pd.notna(latest['ema20_speed']) else 0.0,          # 4. Скорость EMA 20
+            float(latest['ema50_speed']) if pd.notna(latest['ema50_speed']) else 0.0,          # 5. Скорость EMA 50
+            float(latest['price_speed_vs_ema20']) if pd.notna(latest['price_speed_vs_ema20']) else 0.0,  # 6. Скорость цены vs EMA 20
+            float(latest['ema20_to_ema50']) if pd.notna(latest['ema20_to_ema50']) else 0.0,    # 7. Расстояние EMA 20-50
+            float(latest['price_to_ema20']) if pd.notna(latest['price_to_ema20']) else 0.0,    # 8. Расстояние цена-EMA 20
+            float(latest['trend_angle']) if pd.notna(latest['trend_angle']) else 0.0,          # 9. Угол тренда
+            float(latest['trend_type']) if pd.notna(latest['trend_type']) else 1.0             # 10. Тип тренда
         ])
+        
+        # Проверяем, что получили ровно 10 признаков
+        if len(features) != 10:
+            logger.warning(f"Количество признаков не совпадает: ожидается 10, получено {len(features)}")
+            # Если что-то пошло не так, возвращаем нулевой массив
+            return np.zeros(10)
         
         return features
 

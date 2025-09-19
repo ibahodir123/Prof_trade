@@ -13,10 +13,10 @@ import pandas as pd
 import numpy as np
 import joblib
 from datetime import datetime
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+from ema_pattern_analyzer import EMAPatternAnalyzer
+from ema_trend_trainer import EMATrendTrainer
 
 # Настройка matplotlib для работы без GUI
 import matplotlib
@@ -237,8 +237,127 @@ def prepare_ml_features(df):
         logger.error(f"❌ Ошибка подготовки признаков: {e}")
         return None
 
+def analyze_coin_signal_ema(symbol):
+    """Анализ монеты с использованием EMA паттернов"""
+    try:
+        # Очищаем символ от дублирования USDT
+        clean_symbol = symbol.replace(':USDT', '') if ':USDT' in symbol else symbol
+        
+        # Получение данных с Binance
+        logger.info(f"📊 Получаю данные {symbol} с Binance для EMA анализа...")
+        df = get_binance_data(symbol, timeframe='1h', limit=500)
+        
+        if df is None or df.empty:
+            logger.error(f"❌ Нет данных для {symbol}")
+            return {
+                'symbol': clean_symbol,
+                'signal_type': "❌ МОНЕТА НЕ НАЙДЕНА",
+                'strength_text': f"Монета {clean_symbol} не найдена на Binance",
+                'entry_price': None,
+                'take_profit': None,
+                'stop_loss': None,
+                'rsi': None,
+                'ml_status': "Не найдена",
+                'df': None,
+                'error': f"Монета {clean_symbol} не найдена на Binance"
+            }
+        
+        # Инициализируем EMA анализатор
+        ema_analyzer = EMAPatternAnalyzer()
+        
+        # Анализируем EMA паттерны
+        logger.info(f"🔍 Анализирую EMA паттерны для {symbol}...")
+        
+        # Конвертируем DataFrame в формат OHLCV для анализатора
+        ohlcv_data = []
+        for timestamp, row in df.iterrows():
+            ohlcv_data.append([
+                int(timestamp.timestamp() * 1000),  # Конвертируем в миллисекунды
+                float(row['open']),
+                float(row['high']),
+                float(row['low']),
+                float(row['close']),
+                float(row['volume'])
+            ])
+        
+        ema_analysis = ema_analyzer.analyze_coin(symbol, ohlcv_data)
+        
+        if 'error' in ema_analysis:
+            logger.error(f"❌ Ошибка EMA анализа {symbol}: {ema_analysis['error']}")
+            return {
+                'symbol': clean_symbol,
+                'signal_type': "❌ ОШИБКА АНАЛИЗА",
+                'strength_text': f"Ошибка EMA анализа: {ema_analysis['error']}",
+                'entry_price': None,
+                'take_profit': None,
+                'stop_loss': None,
+                'rsi': None,
+                'ml_status': "Ошибка",
+                'df': df,
+                'error': ema_analysis['error']
+            }
+        
+        # Извлекаем результаты анализа
+        trend = ema_analysis.get('trend', 'НЕИЗВЕСТНО')
+        signal_type = ema_analysis.get('signal_type', 'ОЖИДАНИЕ')
+        confidence = ema_analysis.get('confidence', 0)
+        
+        logger.info(f"📊 EMA анализ {symbol}:")
+        logger.info(f"   Тренд: {trend}")
+        logger.info(f"   Сигнал: {signal_type}")
+        logger.info(f"   Уверенность: {confidence}%")
+        
+        # Получаем цену входа
+        entry_price = ema_analysis.get('current_price', df['close'].iloc[-1])
+        
+        # Расчет RSI для совместимости
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        current_rsi = rsi.iloc[-1] if not rsi.empty else 50
+        
+        # Формируем результат
+        result = {
+            'symbol': clean_symbol,
+            'signal_type': signal_type,
+            'strength_text': f"EMA {trend} тренд",
+            'entry_price': entry_price,
+            'take_profit': None,
+            'stop_loss': None,
+            'rsi': current_rsi,
+            'ml_status': "EMA Активна",
+            'df': df,
+            'ema_analysis': {
+                'trend': trend,
+                'confidence': confidence,
+                'ema20': ema_analysis.get('ema20'),
+                'ema50': ema_analysis.get('ema50'),
+                'ema100': ema_analysis.get('ema100')
+            }
+        }
+        
+        logger.info(f"✅ EMA анализ {symbol} завершен: {signal_type}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка EMA анализа {symbol}: {e}")
+        return {
+            'symbol': clean_symbol if 'clean_symbol' in locals() else symbol,
+            'signal_type': "❌ ОШИБКА",
+            'strength_text': f"Критическая ошибка: {str(e)}",
+            'entry_price': None,
+            'take_profit': None,
+            'stop_loss': None,
+            'rsi': None,
+            'ml_status': "Ошибка",
+            'df': None,
+            'error': str(e)
+        }
+
 def analyze_coin_signal(symbol):
-    """Анализ монеты и генерация сигнала"""
+    """Анализ монеты и генерация сигнала (старая логика)"""
     try:
         # Очищаем символ от дублирования USDT
         clean_symbol = symbol.replace(':USDT', '') if ':USDT' in symbol else symbol
@@ -538,10 +657,8 @@ def analyze_coin_signal(symbol):
 
 # Глобальные переменные
 current_coin = "BTC/USDT"
-auto_signals_enabled = False
 available_pairs = []
 config = None
-scheduler = None
 application = None
 
 def create_advanced_trading_chart(symbol, df, signal_data):
@@ -690,7 +807,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔍 Анализ монеты", callback_data="menu_analyze")],
         [InlineKeyboardButton("🔍 Поиск монет", callback_data="menu_search")],
         [InlineKeyboardButton("🚀 Стреляющие монеты", callback_data="menu_shooting_stars")],
-        [InlineKeyboardButton("🤖 Авто сигналы", callback_data="menu_auto")]
+        [InlineKeyboardButton("📈 EMA Анализ", callback_data="menu_ema_analysis")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -725,18 +842,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_analyze_menu(query, context)
         elif query.data == "menu_search":
             await handle_search_menu(query, context)
-        elif query.data == "menu_auto":
-            await handle_auto_menu(query, context)
         elif query.data == "menu_shooting_stars":
             await handle_shooting_stars_menu(query, context)
+        elif query.data == "menu_ema_analysis":
+            await handle_ema_analysis_menu(query, context)
         elif query.data.startswith("select_"):
             await handle_coin_selection(query, context)
-        elif query.data == "auto_start":
-            await handle_auto_start(query, context)
-        elif query.data == "auto_stop":
-            await handle_auto_stop(query, context)
         elif query.data == "find_shooting_stars":
             await handle_find_shooting_stars(query, context)
+        elif query.data == "train_ema_models":
+            await handle_train_ema_models(query, context)
+        elif query.data == "ema_analyze_coin":
+            await handle_ema_analyze_coin(query, context)
+        elif query.data.startswith("ema_analyze_"):
+            symbol = query.data.replace("ema_analyze_", "")
+            await handle_ema_coin_analysis(query, context, symbol)
         elif query.data == "back_to_main":
             await back_to_main_menu(query, context)
             
@@ -755,7 +875,6 @@ async def handle_status_menu(query, context):
 📊 **Статус системы**
 
 🪙 **Текущая монета:** {current_coin}
-🤖 **Авто сигналы:** {'✅ Включены' if auto_signals_enabled else '❌ Выключены'}
 ⏰ **Время:** {datetime.now().strftime('%H:%M:%S')}
 🔗 **API:** Binance (ccxt)
 
@@ -918,30 +1037,6 @@ async def handle_shooting_stars_menu(query, context):
     except Exception as e:
         await query.edit_message_text(f"❌ Ошибка стреляющих монет: {str(e)}")
 
-async def handle_auto_menu(query, context):
-    """Обработка кнопки Авто сигналы"""
-    try:
-        status = "✅ Включены" if auto_signals_enabled else "❌ Выключены"
-        action = "Остановить" if auto_signals_enabled else "Запустить"
-        callback = "auto_stop" if auto_signals_enabled else "auto_start"
-        
-        message = f"""
-🤖 **Автоматические сигналы**
-
-**Статус:** {status}
-
-Автоматические сигналы отправляются каждые 30 минут с лучшими сигналами.
-        """
-        
-        keyboard = [
-            [InlineKeyboardButton(f"🔄 {action}", callback_data=callback)],
-            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(message, reply_markup=reply_markup)
-    except Exception as e:
-        await query.edit_message_text(f"❌ Ошибка управления авто сигналами: {str(e)}")
 
 async def handle_coin_selection(query, context):
     """Обработка выбора монеты"""
@@ -963,7 +1058,7 @@ async def handle_find_shooting_stars(query, context):
         await query.edit_message_text("🔮 **Поиск стреляющих монет...**\n\n⏳ Анализирую все монеты на Binance...")
         
         # Получаем список всех монет
-        available_pairs = get_available_pairs()
+        available_pairs = await get_available_pairs()
         
         # Ограничиваем анализ первыми 50 монетами для скорости
         pairs_to_analyze = available_pairs[:50]
@@ -1067,6 +1162,176 @@ async def handle_find_shooting_stars(query, context):
         logger.error(f"❌ Ошибка поиска стреляющих монет: {e}")
         await query.edit_message_text(f"❌ Ошибка поиска стреляющих монет: {str(e)}")
 
+async def handle_ema_analysis_menu(query, context):
+    """Меню EMA анализа"""
+    try:
+        await query.answer()
+        
+        keyboard = [
+            [InlineKeyboardButton("🤖 Обучить EMA модели", callback_data="train_ema_models")],
+            [InlineKeyboardButton("📊 EMA анализ монеты", callback_data="ema_analyze_coin")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="start")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        message = """📈 **EMA АНАЛИЗ**
+
+🎯 **Возможности:**
+• Обучение моделей на EMA закономерностях
+• Анализ трендов по EMA 20, 50, 100
+• Поиск импульсов и коррекций
+• Точки входа на основе EMA структур
+
+📊 **Особенности:**
+• Фокус на скорости движения EMA
+• Соответствие скорости цены и EMA
+• Расстояния между EMA линиями
+• Без лишних технических индикаторов
+"""
+        
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка EMA меню: {e}")
+        await query.edit_message_text("❌ Ошибка отображения меню")
+
+async def handle_train_ema_models(query, context):
+    """Обучение EMA моделей на исторических данных"""
+    try:
+        await query.answer()
+        await query.edit_message_text("🤖 Обучаю EMA модели на исторических данных...")
+        
+        # Инициализируем тренер
+        trainer = EMATrendTrainer()
+        
+        # Список символов для обучения
+        symbols = [
+            'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT',
+            'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT'
+        ]
+        
+        # Собираем данные
+        await query.edit_message_text("📊 Собираю исторические данные...")
+        historical_data = trainer.collect_historical_data(symbols, days=30)
+        
+        if not historical_data:
+            await query.edit_message_text("❌ Не удалось собрать данные для обучения")
+            return
+        
+        # Обучаем модели
+        await query.edit_message_text("🤖 Обучаю EMA модели...")
+        models = trainer.train_ema_models(historical_data)
+        
+        if models:
+            message = f"✅ **EMA МОДЕЛИ ОБУЧЕНЫ!**\n\n"
+            message += f"📊 Обучено моделей: {len(models)}\n"
+            message += f"📈 Символов в обучении: {len(historical_data)}\n"
+            message += f"📅 Данные с: 1 января 2025\n\n"
+            message += "🎯 Модели готовы к использованию!"
+            
+            await query.edit_message_text(message, parse_mode='Markdown')
+        else:
+            await query.edit_message_text("❌ Не удалось обучить EMA модели")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка обучения EMA моделей: {e}")
+        await query.edit_message_text("❌ Ошибка обучения EMA моделей")
+
+async def handle_ema_analyze_coin(query, context):
+    """EMA анализ конкретной монеты"""
+    try:
+        await query.answer()
+        
+        # Показываем популярные монеты для анализа
+        keyboard = [
+            [InlineKeyboardButton("BTC/USDT", callback_data="ema_analyze_BTC/USDT")],
+            [InlineKeyboardButton("ETH/USDT", callback_data="ema_analyze_ETH/USDT")],
+            [InlineKeyboardButton("BNB/USDT", callback_data="ema_analyze_BNB/USDT")],
+            [InlineKeyboardButton("ADA/USDT", callback_data="ema_analyze_ADA/USDT")],
+            [InlineKeyboardButton("SOL/USDT", callback_data="ema_analyze_SOL/USDT")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="menu_ema_analysis")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        message = """📊 **EMA АНАЛИЗ МОНЕТЫ**
+
+Выберите монету для анализа EMA паттернов:
+
+🎯 **Что анализируется:**
+• Тренд по EMA 20, 50, 100
+• Скорость движения EMA линий
+• Соответствие скорости цены и EMA
+• Расстояния между EMA
+• Импульсы и коррекции
+• Точки входа/выхода
+"""
+        
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка EMA анализа монеты: {e}")
+        await query.edit_message_text("❌ Ошибка отображения монет")
+
+async def handle_ema_coin_analysis(query, context, symbol):
+    """Анализ конкретной монеты с EMA"""
+    try:
+        await query.answer()
+        await query.edit_message_text(f"📊 Анализирую {symbol} с помощью EMA...")
+        
+        # Выполняем EMA анализ
+        signal_data = analyze_coin_signal_ema(symbol)
+        
+        if signal_data.get('error'):
+            await query.edit_message_text(f"❌ Ошибка анализа {symbol}: {signal_data['error']}")
+            return
+        
+        # Формируем сообщение с результатами
+        ema_analysis = signal_data.get('ema_analysis', {})
+        
+        message = f"""📈 EMA АНАЛИЗ {symbol}
+
+🎯 Результат: {signal_data['signal_type']}
+📝 Обоснование: {signal_data['strength_text']}
+
+📊 EMA Данные:
+• Тренд: {ema_analysis.get('trend', 'Не определен')}
+• Фаза: {ema_analysis.get('phase', 'Не определена')}
+• Уверенность: {ema_analysis.get('confidence', 0)*100:.1f}%
+
+💰 Цена входа: ${signal_data['entry_price']:.8f}
+"""
+        
+        if signal_data.get('take_profit'):
+            message += f"🎯 Take Profit: ${signal_data['take_profit']:.8f}\n"
+        
+        if signal_data.get('stop_loss'):
+            message += f"🛡️ Stop Loss: ${signal_data['stop_loss']:.8f}\n"
+        
+        # Добавляем EMA уровни
+        levels = ema_analysis.get('levels', {})
+        if levels:
+            message += f"""
+📊 EMA Уровни:
+• EMA 20: ${levels.get('ema_20', 0):.8f}
+• EMA 50: ${levels.get('ema_50', 0):.8f}
+• EMA 100: ${levels.get('ema_100', 0):.8f}
+"""
+        
+        message += f"\n📊 RSI: {signal_data['rsi']:.1f}"
+        message += f"\n🤖 ML статус: {signal_data['ml_status']}"
+        
+        # Кнопка назад
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="ema_analyze_coin")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup)
+        
+        logger.info(f"✅ EMA анализ {symbol} завершен: {signal_data['signal_type']}")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка EMA анализа {symbol}: {e}")
+        await query.edit_message_text(f"❌ Ошибка анализа {symbol}")
+
 def prepare_lstm_features(df):
     """Подготовка признаков для LSTM модели"""
     try:
@@ -1110,224 +1375,8 @@ def prepare_lstm_features(df):
         logger.error(f"❌ Ошибка подготовки LSTM признаков: {e}")
         return None
 
-async def handle_auto_start(query, context):
-    """Обработка запуска авто сигналов"""
-    global auto_signals_enabled, scheduler
-    
-    try:
-        auto_signals_enabled = True
-        logger.info("🤖 Авто сигналы включены пользователем")
-        
-        # Добавляем задачу в планировщик (каждые 30 минут)
-        if scheduler:
-            scheduler.add_job(
-                send_auto_signals,
-                trigger=IntervalTrigger(minutes=30),
-                id='auto_signals',
-                replace_existing=True
-            )
-            logger.info("⏰ Планировщик автосигналов запущен (каждые 30 минут)")
-        
-        message = """
-🤖 **Автоматические сигналы ЗАПУЩЕНЫ!**
 
-✅ **Статус:** Включены
-⏰ **Интервал:** Каждые 30 минут
-📊 **Мониторинг:** Лучшие сигналы
 
-Автоматические сигналы будут отправляться в этот чат с лучшими торговыми сигналами.
-        """
-        
-        keyboard = [
-            [InlineKeyboardButton("🛑 Остановить", callback_data="auto_stop")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(message, reply_markup=reply_markup)
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка запуска авто сигналов: {e}")
-        await query.edit_message_text(f"❌ Ошибка запуска авто сигналов: {str(e)}")
-
-async def handle_auto_stop(query, context):
-    """Обработка остановки авто сигналов"""
-    global auto_signals_enabled, scheduler
-    
-    try:
-        auto_signals_enabled = False
-        logger.info("🤖 Авто сигналы остановлены пользователем")
-        
-        # Удаляем задачу из планировщика
-        if scheduler:
-            try:
-                scheduler.remove_job('auto_signals')
-                logger.info("⏰ Планировщик автосигналов остановлен")
-            except Exception as e:
-                logger.warning(f"⚠️ Не удалось остановить планировщик: {e}")
-        
-        message = """
-🤖 **Автоматические сигналы ОСТАНОВЛЕНЫ!**
-
-❌ **Статус:** Выключены
-⏰ **Интервал:** Неактивен
-📊 **Мониторинг:** Приостановлен
-
-Автоматические сигналы больше не будут отправляться.
-        """
-        
-        keyboard = [
-            [InlineKeyboardButton("🔄 Запустить", callback_data="auto_start")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(message, reply_markup=reply_markup)
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка остановки авто сигналов: {e}")
-        await query.edit_message_text(f"❌ Ошибка остановки авто сигналов: {str(e)}")
-
-async def send_auto_signals():
-    """Отправка автоматических сигналов - анализирует все доступные монеты и выбирает топ-5"""
-    global auto_signals_enabled, application, config, available_pairs
-    
-    if not auto_signals_enabled or not application or not config:
-        return
-    
-    try:
-        logger.info("🤖 Отправляю автосигналы...")
-        
-        # Получаем список всех доступных монет для анализа
-        if not available_pairs:
-            await get_available_pairs()
-        
-        # Анализируем ВСЕ доступные монеты (но с ограничением по времени)
-        coins_to_check = available_pairs
-        logger.info(f"📊 Анализирую {len(coins_to_check)} монет для автосигналов")
-        
-        all_signals = []
-        analyzed_count = 0
-        max_analysis_time = 300  # Максимум 5 минут на анализ
-        start_time = datetime.now()
-        
-        for coin in coins_to_check:
-            try:
-                # Проверяем время выполнения
-                elapsed_time = (datetime.now() - start_time).total_seconds()
-                if elapsed_time > max_analysis_time:
-                    logger.info(f"⏰ Время анализа истекло ({max_analysis_time}с), проанализировано {analyzed_count} монет")
-                    break
-                
-                if analyzed_count % 10 == 0:  # Логируем каждые 10 монет
-                    logger.info(f"🔍 Анализирую {coin}... ({analyzed_count}/{len(coins_to_check)})")
-                
-                signal_data = analyze_coin_signal(coin)
-                if signal_data and signal_data.get('symbol'):
-                    # Добавляем все сигналы (не только LONG)
-                    all_signals.append((signal_data['symbol'], signal_data))
-                
-                analyzed_count += 1
-                    
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка анализа {coin}: {e}")
-                analyzed_count += 1
-                continue
-        
-        if not all_signals:
-            logger.info("ℹ️ Нет сигналов для отправки")
-            return
-        
-        # Фильтруем LONG и SHORT сигналы и сортируем по силе
-        trading_signals = []
-        for coin, signal_data in all_signals:
-            if signal_data.get('signal_type') in ['🟢 LONG', '🔴 SHORT']:
-                # Извлекаем силу сигнала из strength_text
-                strength_text = signal_data.get('strength_text', '')
-                if 'Рост' in strength_text:
-                    try:
-                        # Извлекаем процент из текста "Рост 52.3%"
-                        strength = float(strength_text.split('Рост ')[1].replace('%', '')) / 100
-                        signal_data['signal_strength'] = strength
-                    except:
-                        signal_data['signal_strength'] = 0.5  # По умолчанию для LONG
-                elif 'Падение' in strength_text:
-                    try:
-                        # Извлекаем процент из текста "Падение 45.2%"
-                        strength = float(strength_text.split('Падение ')[1].replace('%', '')) / 100
-                        signal_data['signal_strength'] = strength
-                    except:
-                        signal_data['signal_strength'] = 0.5  # По умолчанию для SHORT
-                else:
-                    signal_data['signal_strength'] = 0.5
-                
-                trading_signals.append((coin, signal_data))
-        
-        # Сортируем по силе сигнала
-        trading_signals.sort(key=lambda x: x[1].get('signal_strength', 0), reverse=True)
-        
-        if trading_signals:
-            # Берем топ-5 лучших сигналов
-            top_signals = trading_signals[:5]
-            
-            # Создаем сообщение с топ-5 сигналами
-            # Подсчитываем LONG и SHORT сигналы
-            long_count = sum(1 for _, data in trading_signals if data.get('signal_type') == '🟢 LONG')
-            short_count = sum(1 for _, data in trading_signals if data.get('signal_type') == '🔴 SHORT')
-            
-            message = f"""🤖 **АВТОМАТИЧЕСКИЕ СИГНАЛЫ**
-⏰ **Время:** {datetime.now().strftime('%H:%M:%S')}
-📊 **Проанализировано:** {analyzed_count} монет (из {len(available_pairs)})
-🟢 **LONG сигналов:** {long_count}
-🔴 **SHORT сигналов:** {short_count}
-
-**🏆 ТОП-{len(top_signals)} ЛУЧШИХ СИГНАЛОВ:**
-
-"""
-            
-            for i, (coin, signal_data) in enumerate(top_signals, 1):
-                strength = signal_data.get('signal_strength', 0.7)
-                signal_type = signal_data.get('signal_type', '⚪ ОЖИДАНИЕ')
-                signal_emoji = "🟢" if "LONG" in signal_type else "🔴" if "SHORT" in signal_type else "⚪"
-                signal_name = "LONG" if "LONG" in signal_type else "SHORT" if "SHORT" in signal_type else "ОЖИДАНИЕ"
-                
-                message += f"""**{i}. {coin}** {signal_emoji} {signal_name}
-💰 Цена: ${signal_data['entry_price']:.8f}
-📈 Сила: {strength*100:.1f}%
-📊 RSI: {signal_data['rsi']:.1f}
-🎯 TP: ${signal_data['take_profit']:.8f}
-🛡️ SL: ${signal_data['stop_loss']:.8f}
-
-"""
-            
-            # Отправляем сообщение
-            await application.bot.send_message(
-                chat_id=config['chat_id'],
-                text=message
-            )
-            
-            logger.info(f"✅ Автосигналы отправлены: топ-{len(top_signals)} из {len(trading_signals)} торговых сигналов")
-        else:
-            # Если нет торговых сигналов, показываем статистику
-            message = f"""🤖 **АВТОМАТИЧЕСКИЕ СИГНАЛЫ**
-⏰ **Время:** {datetime.now().strftime('%H:%M:%S')}
-📊 **Проанализировано:** {analyzed_count} монет (из {len(available_pairs)})
-🟢 **LONG сигналов:** 0
-🔴 **SHORT сигналов:** 0
-
-ℹ️ В данный момент нет сильных торговых сигналов.
-Попробуйте позже или используйте /analyze для анализа конкретной монеты.
-            """
-            
-            await application.bot.send_message(
-                chat_id=config['chat_id'],
-                text=message
-            )
-            
-            logger.info("ℹ️ Нет LONG сигналов для отправки")
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка отправки автосигналов: {e}")
 
 async def back_to_main_menu(query, context):
     """Возврат в главное меню"""
@@ -1339,7 +1388,6 @@ async def back_to_main_menu(query, context):
         [InlineKeyboardButton("📈 Последние сигналы", callback_data="menu_signals")],
         [InlineKeyboardButton("🔍 Анализ монеты", callback_data="menu_analyze")],
         [InlineKeyboardButton("🔍 Поиск монет", callback_data="menu_search")],
-        [InlineKeyboardButton("🤖 Авто сигналы", callback_data="menu_auto")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -1553,7 +1601,7 @@ async def test_binance_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def main():
     """Основная функция"""
-    global config, scheduler, application
+    global config, application
     print("🤖 Запуск Binance ML Telegram Bot")
     print("🔄 Используем Binance API через ccxt")
     
@@ -1578,22 +1626,6 @@ def main():
     # Создаем приложение
     application = Application.builder().token(config["telegram_token"]).build()
     
-    # Инициализируем планировщик после создания приложения
-    scheduler = AsyncIOScheduler()
-    print("⏰ Планировщик задач готов к запуску")
-    
-    # Функция для запуска планировщика после старта бота
-    async def post_init(application):
-        """Запуск планировщика после инициализации бота"""
-        global scheduler
-        try:
-            scheduler.start()
-            print("✅ Планировщик задач запущен успешно")
-        except Exception as e:
-            print(f"⚠️ Ошибка запуска планировщика: {e}")
-    
-    # Добавляем обработчик для запуска планировщика
-    application.post_init = post_init
     
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", start_command))

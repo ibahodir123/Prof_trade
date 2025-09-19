@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Предиктор стреляющих звезд
 Анализирует монеты и предсказывает, когда они "выстрелят" (резко вырастут)
@@ -81,42 +81,42 @@ class ShootingStarPredictor:
             # Идеальные условия для выстрела
             if consolidation_range < 0.05:  # Узкая консолидация
                 probability += 0.2
-                conditions.append("✅ Узкая консолидация")
+                conditions.append(" Узкая консолидация")
             else:
-                conditions.append(f"❌ Широкая консолидация ({consolidation_range:.3f})")
+                conditions.append(f" Широкая консолидация ({consolidation_range:.3f})")
             
             if volume_ratio < 0.8:  # Низкий объем
                 probability += 0.2
-                conditions.append("✅ Низкий объем")
+                conditions.append(" Низкий объем")
             else:
-                conditions.append(f"❌ Высокий объем ({volume_ratio:.2f})")
+                conditions.append(f" Высокий объем ({volume_ratio:.2f})")
             
             if volatility < 0.03:  # Низкая волатильность
                 probability += 0.2
-                conditions.append("✅ Низкая волатильность")
+                conditions.append(" Низкая волатильность")
             else:
-                conditions.append(f"❌ Высокая волатильность ({volatility:.3f})")
+                conditions.append(f" Высокая волатильность ({volatility:.3f})")
             
             if ema_distance < 0.02:  # EMA близко
                 probability += 0.2
-                conditions.append("✅ EMA сближены")
+                conditions.append(" EMA сближены")
             else:
-                conditions.append(f"❌ EMA далеко ({ema_distance:.3f})")
+                conditions.append(f" EMA далеко ({ema_distance:.3f})")
             
             if support_strength > 0.3:  # Хорошая поддержка
                 probability += 0.2
-                conditions.append("✅ Сильная поддержка")
+                conditions.append(" Сильная поддержка")
             else:
-                conditions.append(f"❌ Слабая поддержка ({support_strength:.2f})")
+                conditions.append(f" Слабая поддержка ({support_strength:.2f})")
             
             # Дополнительные факторы
             if price_change_5 > -0.02:  # Не падает сильно
                 probability += 0.1
-                conditions.append("✅ Стабильная цена")
+                conditions.append(" Стабильная цена")
             
             if current_price > ema20 > ema50:  # Восходящий тренд
                 probability += 0.1
-                conditions.append("✅ Восходящий тренд")
+                conditions.append(" Восходящий тренд")
             
             # Ограничиваем вероятность
             probability = min(1.0, probability)
@@ -147,7 +147,7 @@ class ShootingStarPredictor:
                 result = self.analyze_shooting_potential(symbol)
                 if result and result['probability'] >= min_probability:
                     shooting_stars.append(result)
-                    logger.info(f"🚀 {symbol}: вероятность выстрела {result['probability']:.2f}")
+                    logger.info(f" {symbol}: вероятность выстрела {result['probability']:.2f}")
             except Exception as e:
                 logger.error(f"Ошибка анализа {symbol}: {e}")
                 continue
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     # Ищем стреляющие звезды
     shooting_stars = predictor.find_shooting_stars(symbols)
     
-    print(f"\n🚀 Найдено {len(shooting_stars)} потенциальных стреляющих звезд:")
+    print(f"\n Найдено {len(shooting_stars)} потенциальных стреляющих звезд:")
     for star in shooting_stars:
         print(f"\n{star['symbol']} - Вероятность: {star['probability']:.2f}")
         print(f"Цена: ${star['current_price']:.6f}")

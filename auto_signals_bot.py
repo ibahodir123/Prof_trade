@@ -23,7 +23,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
-        logging.FileHandler('auto_signals.log'),
+        logging.FileHandler('auto_signals.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -61,6 +61,9 @@ class AutoSignalsBot:
                 'secret': self.config['binance_api']['secret_key'],
                 'sandbox': False,
                 'enableRateLimit': True,
+                'options': {
+                    'adjustForTimeDifference': True,
+                }
             })
             logger.info("✅ Binance API инициализирован")
         except Exception as e:
@@ -121,7 +124,7 @@ class AutoSignalsBot:
             return usdt_pairs
             
         except Exception as e:
-            logger.error(f"❌ Ошибка получения торговых пар: {e}")
+            logger.error(f"Ошибка получения торговых пар: {e}")
             return []
     
     def calculate_dynamic_percentages(self, signal_strength, signal_type):
@@ -281,7 +284,7 @@ class AutoSignalsBot:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, data=data)
                 if response.status_code == 200:
-                    logger.info("✅ Сообщение отправлено в Telegram")
+                    logger.info("Сообщение отправлено в Telegram")
                 else:
                     logger.error(f"❌ Ошибка отправки в Telegram: {response.status_code}")
                     
@@ -298,7 +301,7 @@ class AutoSignalsBot:
                 await self.get_available_pairs()
             
             coins_to_check = self.available_pairs
-            logger.info(f"📊 Анализирую {len(coins_to_check)} монет для автосигналов")
+            logger.info(f"Анализирую {len(coins_to_check)} монет для автосигналов")
             
             all_signals = []
             analyzed_count = 0
@@ -363,7 +366,7 @@ class AutoSignalsBot:
             
             # Отправляем сообщение
             await self.send_telegram_message(message)
-            logger.info(f"✅ Автосигналы отправлены: {len(top_long)} LONG, {len(top_short)} SHORT")
+            logger.info(f"Автосигналы отправлены: {len(top_long)} LONG, {len(top_short)} SHORT")
             
         except Exception as e:
             logger.error(f"❌ Ошибка отправки автосигналов: {e}")

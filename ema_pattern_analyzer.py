@@ -73,13 +73,28 @@ class EMAPatternAnalyzer:
             # Анализ тренда
             trend = self.detect_trend(current_ema20, current_ema50, current_ema100, current_price)
             
-            # Генерируем простой сигнал
+            # Генерируем сигнал с улучшенной логикой
             signal_type = "ОЖИДАНИЕ"
+            confidence = 30
+
             if trend == "ВОСХОДЯЩИЙ":
                 signal_type = "LONG"
+                confidence = 70
             elif trend == "НИСХОДЯЩИЙ":
                 signal_type = "SHORT"
-            
+                confidence = 70
+            elif trend == "БОКОВОЙ":
+                # Покупка на откате к EMA50
+                if current_price < current_ema50 and current_price > current_ema100:
+                    signal_type = "LONG"
+                    confidence = 60
+                # Продажа на отскоке от EMA20
+                elif current_price > current_ema20 and current_price < current_ema50:
+                    signal_type = "SHORT"
+                    confidence = 60
+                else:
+                    signal_type = "ОЖИДАНИЕ"
+                    confidence = 30
             return {
                 "symbol": symbol,
                 "current_price": current_price,
@@ -88,7 +103,7 @@ class EMAPatternAnalyzer:
                 "ema100": current_ema100,
                 "trend": trend,
                 "signal_type": signal_type,
-                "confidence": 70 if trend != "БОКОВОЙ" else 30
+                "confidence": confidence
             }
             
         except Exception as e:

@@ -185,3 +185,7 @@ Thumbs.db
 
 # GitHub specific
 .github/workflows/secrets.yml
+*.log
+__pycache__/
+*.pyc
+data_batch_*.json

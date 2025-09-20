@@ -1,8 +1,10 @@
 {
-  "telegram_token": "8335262966:AAFwedw3EED2HupymEIUnWWfQFo8IykVwTg",
-  "chat_id": "6916749969",
+  "telegram": {
+    "bot_token": "8335262966:AAFwedw3EED2HupymEIUnWWfQFo8IykVwTg",
+    "chat_id": "6916749969"
+  },
   "binance_api": {
-    "enabled": false,
+    "enabled": true,
     "api_key": "RZ0eHGS8snfTOhcMNiqyDauYfO3cOP6n98M0JYQwBmF9uxlzhgkvhd0af2KMgWnt",
     "secret_key": "vLl2nXCANtF3bHlzupcYHx17005b9QpOK13JbhhLKKFf9WqUMaPFhaUucEjxrQ2P"
   },

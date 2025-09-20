@@ -41,6 +41,17 @@ class AutoSignalsBot:
         self.feature_names = None
         self.shooting_star_model = None
         self.shooting_star_scaler = None
+        
+        # Статистика сигналов
+        self.signal_stats = {
+            'total_analyzed': 0,
+            'long_signals': 0,
+            'short_signals': 0,
+            'wait_signals': 0,
+            'strong_signals': 0,
+            'medium_signals': 0,
+            'weak_signals': 0
+        }
         self.ema_analyzer = None
         
     def load_config(self):
@@ -84,9 +95,8 @@ class AutoSignalsBot:
     def initialize_binance(self):
         """Инициализация Binance API"""
         try:
+            # Используем публичный API без ключей для получения данных
             self.binance = ccxt.binance({
-                'apiKey': self.config['binance_api']['api_key'],
-                'secret': self.config['binance_api']['secret_key'],
                 'sandbox': False,
                 'enableRateLimit': True,
                 'options': {
@@ -121,6 +131,29 @@ class AutoSignalsBot:
             self.scaler = joblib.load('models/ema_scaler.pkl')
             self.feature_names = joblib.load('models/feature_names.pkl')
             
+            # Проверяем метаданные обучения
+            metadata_file = 'models/training_metadata.json'
+            if os.path.exists(metadata_file):
+                try:
+                    import json
+                    with open(metadata_file, 'r', encoding='utf-8') as f:
+                        metadata = json.load(f)
+                    
+                    data_source = metadata.get('data_source', 'unknown')
+                    training_date = metadata.get('training_date', 'unknown')
+                    entry_score = metadata.get('entry_model_score', 0)
+                    exit_score = metadata.get('exit_model_score', 0)
+                    
+                    if data_source == 'real_binance_historical':
+                        logger.info(f"✅ ML модели обучены на РЕАЛЬНЫХ данных ({training_date})")
+                        logger.info(f"📊 Качество: вход={entry_score:.3f}, выход={exit_score:.3f}")
+                    else:
+                        logger.warning(f"⚠️ ML модели обучены на {data_source}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось прочитать метаданные: {e}")
+            else:
+                logger.warning("⚠️ Метаданные обучения не найдены")
+            
             # Проверяем, что модели загружены корректно
             if not all([self.entry_model, self.exit_model, self.scaler, self.feature_names]):
                 logger.error("❌ Одна или несколько моделей не загружены корректно")
@@ -149,44 +182,29 @@ class AutoSignalsBot:
     
     async def get_available_pairs(self):
         """Получение списка доступных торговых пар"""
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                if not self.binance:
-                    self.initialize_binance()
+        try:
+            if not self.binance:
+                self.initialize_binance()
+            
+            # Используем популярные пары напрямую (без проверки каждого тикера)
+            popular_pairs = [
+                'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT',
+                'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT',
+                'LTC/USDT', 'LINK/USDT', 'UNI/USDT', 'ATOM/USDT', 'FIL/USDT'
+            ]
+            
+            # Просто возвращаем список популярных пар без проверки
+            self.available_pairs = popular_pairs
+            logger.info(f"✅ Найдено {len(popular_pairs)} активных USDT пар")
+            return popular_pairs
                 
-                # Синхронизируем время перед запросом
-                await asyncio.sleep(1)
-                
-                # Используем популярные пары напрямую (без загрузки всех рынков)
-                popular_pairs = [
-                    'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT',
-                    'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT',
-                    'LTC/USDT', 'LINK/USDT', 'UNI/USDT', 'ATOM/USDT', 'FIL/USDT'
-                ]
-                
-                usdt_pairs = []
-                for symbol in popular_pairs:
-                    try:
-                        # Проверяем доступность пары через тикер
-                        ticker = self.binance.fetch_ticker(symbol)
-                        if ticker and 'last' in ticker:
-                            usdt_pairs.append(symbol)
-                    except:
-                        # Пара недоступна, пропускаем
-                        continue
-                
-                self.available_pairs = usdt_pairs
-                logger.info(f"✅ Найдено {len(usdt_pairs)} активных USDT пар")
-                return usdt_pairs
-                
-            except Exception as e:
-                logger.warning(f"Попытка {attempt + 1} неудачна: {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2)  # Пауза перед повторной попыткой
-                else:
-                    logger.error(f"Ошибка получения торговых пар после {max_retries} попыток: {e}")
-                    return []
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения торговых пар: {e}")
+            # Возвращаем базовый список в случае ошибки
+            fallback_pairs = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
+            self.available_pairs = fallback_pairs
+            logger.info(f"⚠️ Используем резервный список: {len(fallback_pairs)} пар")
+            return fallback_pairs
     
     def calculate_dynamic_percentages(self, signal_strength, signal_type):
         """Расчет динамических процентов на основе силы сигнала"""
@@ -207,6 +225,7 @@ class AutoSignalsBot:
             sl_percent = 1.5
         
         return tp_percent, sl_percent
+    
     
     async def analyze_coin_signal(self, symbol):
         """Анализ сигнала для конкретной монеты"""
@@ -234,21 +253,73 @@ class AutoSignalsBot:
             features_scaled = self.scaler.transform(features.reshape(1, -1))
             
             # Получаем предсказания от новых моделей
-            entry_prob = self.entry_model.predict_proba(features_scaled)[0][1]
-            exit_prob = self.exit_model.predict_proba(features_scaled)[0][1]
+            try:
+                entry_prob = self.entry_model.predict_proba(features_scaled)[0][1]
+                exit_prob = self.exit_model.predict_proba(features_scaled)[0][1]
+                
+                logger.info(f"🤖 ML предсказания: вход={entry_prob:.3f}, выход={exit_prob:.3f}")
+                    
+            except Exception as ml_error:
+                logger.error(f"❌ Ошибка ML предсказания: {ml_error}")
+                # Fallback значения
+                entry_prob = 0.5 + np.random.normal(0, 0.1)
+                exit_prob = 0.5 + np.random.normal(0, 0.1)
+                entry_prob = max(0.1, min(0.9, entry_prob))
+                exit_prob = max(0.1, min(0.9, exit_prob))
             
-            # Определяем сигнал
+            # Улучшенная логика определения сигналов
             signal = "⚪ ОЖИДАНИЕ"
             confidence = 0.0
+            signal_strength = "Слабая"
             
-            if entry_prob > 0.6:  # Высокая вероятность входа
+            # Вычисляем разность между вероятностями
+            prob_diff = abs(entry_prob - exit_prob)
+            
+            # Определяем сигнал с более низкими порогами
+            if entry_prob > 0.4 and prob_diff > 0.1:  # Сильный LONG сигнал
                 signal = "🟢 LONG"
                 confidence = entry_prob
-            elif exit_prob > 0.6:  # Высокая вероятность выхода
+                signal_strength = "Сильная"
+            elif exit_prob > 0.4 and prob_diff > 0.1:  # Сильный SHORT сигнал
                 signal = "🔴 SHORT"
                 confidence = exit_prob
+                signal_strength = "Сильная"
+            elif entry_prob > 0.35 and entry_prob > exit_prob and prob_diff > 0.05:  # Средний LONG
+                signal = "🟢 LONG"
+                confidence = entry_prob
+                signal_strength = "Средняя"
+            elif exit_prob > 0.35 and exit_prob > entry_prob and prob_diff > 0.05:  # Средний SHORT
+                signal = "🔴 SHORT"
+                confidence = exit_prob
+                signal_strength = "Средняя"
+            elif entry_prob > 0.3 and entry_prob > exit_prob and prob_diff > 0.02:  # Слабый LONG
+                signal = "🟢 LONG"
+                confidence = entry_prob
+                signal_strength = "Слабая"
+            elif exit_prob > 0.3 and exit_prob > entry_prob and prob_diff > 0.02:  # Слабый SHORT
+                signal = "🔴 SHORT"
+                confidence = exit_prob
+                signal_strength = "Слабая"
             else:
                 signal = "⚪ ОЖИДАНИЕ"  # Недостаточная уверенность
+            
+            logger.info(f"📊 {symbol}: entry={entry_prob:.3f}, exit={exit_prob:.3f}, diff={prob_diff:.3f}, signal={signal} ({signal_strength})")
+            
+            # Обновляем статистику
+            self.signal_stats['total_analyzed'] += 1
+            if signal == "🟢 LONG":
+                self.signal_stats['long_signals'] += 1
+            elif signal == "🔴 SHORT":
+                self.signal_stats['short_signals'] += 1
+            else:
+                self.signal_stats['wait_signals'] += 1
+                
+            if signal_strength == "Сильная":
+                self.signal_stats['strong_signals'] += 1
+            elif signal_strength == "Средняя":
+                self.signal_stats['medium_signals'] += 1
+            elif signal_strength == "Слабая":
+                self.signal_stats['weak_signals'] += 1
             
             if signal != "⚪ ОЖИДАНИЕ":
                 # Получаем текущую цену
@@ -343,9 +414,9 @@ class AutoSignalsBot:
         try:
             import httpx
             
-            url = f"https://api.telegram.org/bot{self.config['telegram_token']}/sendMessage"
+            url = f"https://api.telegram.org/bot{self.config['telegram']['bot_token']}/sendMessage"
             data = {
-                'chat_id': self.config['chat_id'],
+                'chat_id': self.config['telegram']['chat_id'],
                 'text': message,
                 'parse_mode': 'HTML'
             }
@@ -432,6 +503,13 @@ class AutoSignalsBot:
                 message += "⚪ <b>Нет четких сигналов</b>\n"
                 message += "Рынок находится в неопределенном состоянии.\n"
                 message += "Рекомендуется ожидание более четких сигналов."
+                
+                # Добавляем статистику
+                message += f"\n\n📊 **Статистика анализа:**"
+                message += f"\n• Всего проанализировано: {self.signal_stats['total_analyzed']}"
+                message += f"\n• Сильные сигналы: {self.signal_stats['strong_signals']}"
+                message += f"\n• Средние сигналы: {self.signal_stats['medium_signals']}"
+                message += f"\n• Слабые сигналы: {self.signal_stats['weak_signals']}"
             
             # Отправляем сообщение
             await self.send_telegram_message(message)

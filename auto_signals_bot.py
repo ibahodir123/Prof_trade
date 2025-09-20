@@ -343,9 +343,9 @@ class AutoSignalsBot:
         try:
             import httpx
             
-            url = f"https://api.telegram.org/bot{self.config['telegram_token']}/sendMessage"
+            url = f"https://api.telegram.org/bot{self.config['telegram']['bot_token']}/sendMessage"
             data = {
-                'chat_id': self.config['chat_id'],
+                'chat_id': self.config['telegram']['chat_id'],
                 'text': message,
                 'parse_mode': 'HTML'
             }

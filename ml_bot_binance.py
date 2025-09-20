@@ -1373,7 +1373,7 @@ async def handle_ema_coin_analysis(query, context, symbol):
         # Выполняем EMA анализ
         signal_data = analyze_coin_signal_advanced_ema(symbol)
         
-        п_data.get('error'):
+        if signal_data.get('error'):
             await query.edit_message_text(f"❌ Ошибка анализа {symbol}: {signal_data['error']}")
             return
         

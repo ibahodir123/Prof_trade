@@ -15,8 +15,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-# from ema_pattern_analyzer import EMAPatternAnalyzer
-# from ema_trend_trainer import EMATrendTrainer
+from advanced_ema_analyzer import AdvancedEMAAnalyzer
+from advanced_ml_trainer import AdvancedMLTrainer
 
 # Настройка логирования
 logging.basicConfig(
@@ -35,8 +35,8 @@ class AutoSignalsBot:
         self.binance = None
         self.available_pairs = []
         self.scheduler = AsyncIOScheduler()
-        self.min_detector = None
-        self.max_detector = None
+        self.entry_model = None
+        self.exit_model = None
         self.scaler = None
         self.feature_names = None
         self.shooting_star_model = None
@@ -46,11 +46,39 @@ class AutoSignalsBot:
     def load_config(self):
         """Загрузка конфигурации бота"""
         try:
+            import os
+            if not os.path.exists('bot_config.json'):
+                logger.error("❌ Файл конфигурации bot_config.json не найден")
+                return None
+                
             with open('bot_config.json', 'r', encoding='utf-8') as f:
                 config = json.load(f)
+            
+            # Проверяем обязательные поля конфигурации
+            required_fields = ['binance_api', 'telegram']
+            for field in required_fields:
+                if field not in config:
+                    logger.error(f"❌ Отсутствует обязательное поле в конфигурации: {field}")
+                    return None
+                    
+            # Проверяем поля Binance API
+            binance_fields = ['api_key', 'secret_key']
+            for field in binance_fields:
+                if field not in config['binance_api']:
+                    logger.error(f"❌ Отсутствует поле Binance API: {field}")
+                    return None
+                    
+            # Проверяем поля Telegram
+            telegram_fields = ['bot_token', 'chat_id']
+            for field in telegram_fields:
+                if field not in config['telegram']:
+                    logger.error(f"❌ Отсутствует поле Telegram: {field}")
+                    return None
+            
+            logger.info("✅ Конфигурация загружена и проверена")
             return config
         except Exception as e:
-            logger.error(f"Ошибка загрузки конфигурации: {e}")
+            logger.error(f"❌ Ошибка загрузки конфигурации: {e}")
             return None
     
     def initialize_binance(self):
@@ -73,13 +101,33 @@ class AutoSignalsBot:
     def load_models(self):
         """Загрузка ML моделей"""
         try:
-            # Загружаем основные модели
-            self.min_detector = joblib.load('models/minimum_detector.pkl')
-            self.max_detector = joblib.load('models/maximum_detector.pkl')
-            self.scaler = joblib.load('models/scaler.pkl')
+            # Проверяем существование файлов моделей
+            import os
+            required_files = [
+                'models/entry_model.pkl',
+                'models/exit_model.pkl', 
+                'models/ema_scaler.pkl',
+                'models/feature_names.pkl'
+            ]
+            
+            for file_path in required_files:
+                if not os.path.exists(file_path):
+                    logger.error(f"❌ Файл модели не найден: {file_path}")
+                    return False
+            
+            # Загружаем новые модели (10 признаков)
+            self.entry_model = joblib.load('models/entry_model.pkl')
+            self.exit_model = joblib.load('models/exit_model.pkl')
+            self.scaler = joblib.load('models/ema_scaler.pkl')
             self.feature_names = joblib.load('models/feature_names.pkl')
             
-            logger.info("✅ Основные ML модели загружены")
+            # Проверяем, что модели загружены корректно
+            if not all([self.entry_model, self.exit_model, self.scaler, self.feature_names]):
+                logger.error("❌ Одна или несколько моделей не загружены корректно")
+                return False
+                
+            logger.info("✅ Основные ML модели загружены и проверены")
+            return True
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки основных моделей: {e}")
             return False
@@ -110,19 +158,23 @@ class AutoSignalsBot:
                 # Синхронизируем время перед запросом
                 await asyncio.sleep(1)
                 
-                markets = self.binance.load_markets()
-                usdt_pairs = []
-                
-                # Берем только популярные пары для автосигналов
+                # Используем популярные пары напрямую (без загрузки всех рынков)
                 popular_pairs = [
                     'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT',
                     'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT',
                     'LTC/USDT', 'LINK/USDT', 'UNI/USDT', 'ATOM/USDT', 'FIL/USDT'
                 ]
                 
+                usdt_pairs = []
                 for symbol in popular_pairs:
-                    if symbol in markets and markets[symbol]['active']:
-                        usdt_pairs.append(symbol)
+                    try:
+                        # Проверяем доступность пары через тикер
+                        ticker = self.binance.fetch_ticker(symbol)
+                        if ticker and 'last' in ticker:
+                            usdt_pairs.append(symbol)
+                    except:
+                        # Пара недоступна, пропускаем
+                        continue
                 
                 self.available_pairs = usdt_pairs
                 logger.info(f"✅ Найдено {len(usdt_pairs)} активных USDT пар")
@@ -181,25 +233,22 @@ class AutoSignalsBot:
             # Нормализуем признаки
             features_scaled = self.scaler.transform(features.reshape(1, -1))
             
-            # Получаем предсказания
-            min_prob = self.min_detector.predict_proba(features_scaled)[0][1]
-            max_prob = self.max_detector.predict_proba(features_scaled)[0][1]
+            # Получаем предсказания от новых моделей
+            entry_prob = self.entry_model.predict_proba(features_scaled)[0][1]
+            exit_prob = self.exit_model.predict_proba(features_scaled)[0][1]
             
             # Определяем сигнал
-            diff = max_prob - min_prob
             signal = "⚪ ОЖИДАНИЕ"
             confidence = 0.0
             
-            if diff > 0.02:      # Разница больше 2%
-                if max_prob > 0.3:  # Достаточная уверенность
-                    signal = "🔴 SHORT"
-                    confidence = max_prob
-            elif diff < -0.02:   # Разница меньше -2%
-                if min_prob > 0.3:  # Достаточная уверенность
-                    signal = "🟢 LONG"
-                    confidence = min_prob
+            if entry_prob > 0.6:  # Высокая вероятность входа
+                signal = "🟢 LONG"
+                confidence = entry_prob
+            elif exit_prob > 0.6:  # Высокая вероятность выхода
+                signal = "🔴 SHORT"
+                confidence = exit_prob
             else:
-                signal = "⚪ ОЖИДАНИЕ"  # Разница менее 2%
+                signal = "⚪ ОЖИДАНИЕ"  # Недостаточная уверенность
             
             if signal != "⚪ ОЖИДАНИЕ":
                 # Получаем текущую цену
@@ -234,49 +283,60 @@ class AutoSignalsBot:
             return None
     
     def prepare_features(self, df):
-        """Подготовка признаков для ML модели"""
+        """Подготовка признаков для ML модели (10 признаков)"""
         try:
-            # Базовые признаки
-            df['rsi'] = self.calculate_rsi(df['close'])
+            if len(df) < 20:
+                return np.zeros(10)
+            
+            # Базовые EMA
             df['ema_20'] = df['close'].ewm(span=20).mean()
             df['ema_50'] = df['close'].ewm(span=50).mean()
             df['ema_100'] = df['close'].ewm(span=100).mean()
             
-            # Дополнительные признаки
-            df['price_change'] = df['close'].pct_change()
-            df['volume_change'] = df['volume'].pct_change()
-            df['high_low_ratio'] = df['high'] / df['low']
-            df['close_open_ratio'] = df['close'] / df['open']
+            # Скорости EMA
+            df['ema20_speed'] = df['ema_20'].diff(5) / df['ema_20']
+            df['ema50_speed'] = df['ema_50'].diff(5) / df['ema_50']
             
-            # Скользящие средние
-            df['sma_10'] = df['close'].rolling(10).mean()
-            df['sma_20'] = df['close'].rolling(20).mean()
+            # Скорость цены относительно EMA 20
+            df['price_speed_vs_ema20'] = (df['close'] - df['ema_20']) / df['ema_20']
             
-            # Волатильность
-            df['volatility'] = df['price_change'].rolling(20).std()
+            # Расстояния между EMA
+            df['ema20_to_ema50'] = (df['ema_20'] - df['ema_50']) / df['ema_50']
             
-            # Последние значения для модели
-            features = []
-            for col in self.feature_names:
-                if col in df.columns:
-                    features.append(df[col].iloc[-1])
-                else:
-                    features.append(0.0)
+            # Расстояние цены до EMA 20
+            df['price_to_ema20'] = (df['close'] - df['ema_20']) / df['ema_20']
             
-            return np.array(features)
+            # Угол тренда (упрощенный)
+            df['trend_angle'] = np.arctan(df['ema_20'].diff(10) / df['ema_20']) * 180 / np.pi
+            
+            # Тип тренда (1=нисходящий, 2=восходящий, 3=боковой)
+            df['trend_type'] = 1  # По умолчанию нисходящий
+            df.loc[df['ema_20'] > df['ema_50'], 'trend_type'] = 2  # Восходящий
+            df.loc[(df['ema_20'] - df['ema_50']).abs() < df['close'] * 0.01, 'trend_type'] = 3  # Боковой
+            
+            # Берем последние значения
+            latest = df.iloc[-1]
+            
+            # Создаем массив из 10 признаков с проверкой на NaN
+            features = np.array([
+                float(latest['ema_20']) if pd.notna(latest['ema_20']) else 0.0,
+                float(latest['ema_50']) if pd.notna(latest['ema_50']) else 0.0,
+                float(latest['ema_100']) if pd.notna(latest['ema_100']) else 0.0,
+                float(latest['ema20_speed']) if pd.notna(latest['ema20_speed']) else 0.0,
+                float(latest['ema50_speed']) if pd.notna(latest['ema50_speed']) else 0.0,
+                float(latest['price_speed_vs_ema20']) if pd.notna(latest['price_speed_vs_ema20']) else 0.0,
+                float(latest['ema20_to_ema50']) if pd.notna(latest['ema20_to_ema50']) else 0.0,
+                float(latest['price_to_ema20']) if pd.notna(latest['price_to_ema20']) else 0.0,
+                float(latest['trend_angle']) if pd.notna(latest['trend_angle']) else 0.0,
+                float(latest['trend_type']) if pd.notna(latest['trend_type']) else 1.0
+            ])
+            
+            return features
             
         except Exception as e:
             logger.error(f"❌ Ошибка подготовки признаков: {e}")
             return None
     
-    def calculate_rsi(self, prices, period=14):
-        """Расчет RSI"""
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
     
     async def send_telegram_message(self, message):
         """Отправка сообщения в Telegram"""

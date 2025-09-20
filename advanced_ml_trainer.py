@@ -114,6 +114,25 @@ class AdvancedMLTrainer:
             self.entry_model.fit(X_scaled, y_entry)
             self.exit_model.fit(X_scaled, y_exit)
             
+            # Проверяем качество моделей
+            entry_score = self.entry_model.score(X_scaled, y_entry)
+            exit_score = self.exit_model.score(X_scaled, y_exit)
+            
+            logger.info(f"📊 Качество модели входа: {entry_score:.3f}")
+            logger.info(f"📊 Качество модели выхода: {exit_score:.3f}")
+            
+            # Проверяем, что модели работают
+            if entry_score < 0.5 or exit_score < 0.5:
+                logger.warning("⚠️ Низкое качество моделей, но продолжаем...")
+            
+            # Проверяем, что модели имеют нужные методы
+            if not hasattr(self.entry_model, 'predict_proba'):
+                logger.error("❌ Модель входа не поддерживает predict_proba")
+                return False
+            if not hasattr(self.exit_model, 'predict_proba'):
+                logger.error("❌ Модель выхода не поддерживает predict_proba")
+                return False
+            
             # Сохраняем модели
             import os
             os.makedirs('models', exist_ok=True)
@@ -123,7 +142,22 @@ class AdvancedMLTrainer:
             joblib.dump(self.scaler, 'models/ema_scaler.pkl')
             joblib.dump([f'feature_{i}' for i in range(n_features)], 'models/feature_names.pkl')
             
-            logger.info("✅ ML МОДЕЛИ ОБУЧЕНЫ И СОХРАНЕНЫ!")
+            # Проверяем, что файлы сохранены
+            saved_files = [
+                'models/entry_model.pkl',
+                'models/exit_model.pkl', 
+                'models/ema_scaler.pkl',
+                'models/feature_names.pkl'
+            ]
+            
+            for file_path in saved_files:
+                if not os.path.exists(file_path):
+                    logger.error(f"❌ Файл модели не сохранен: {file_path}")
+                    return False
+                else:
+                    logger.info(f"✅ Файл сохранен: {file_path}")
+            
+            logger.info("✅ ML МОДЕЛИ ОБУЧЕНЫ, ПРОВЕРЕНЫ И СОХРАНЕНЫ!")
             return True
             
         except Exception as e:

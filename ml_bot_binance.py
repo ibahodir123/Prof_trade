@@ -16,8 +16,8 @@ import joblib
 from datetime import datetime
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from advanced_ema_analyzer import AdvancedEMAAnalyzer
-from advanced_ml_trainer import AdvancedMLTrainer
+from advanced_bot_state.ema_analyzer import AdvancedEMAAnalyzer
+from advanced_bot_state.ml_trainer import AdvancedMLTrainer
 from shooting_star_predictor import ShootingStarPredictor
 
 # Настройка matplotlib для работы без GUI
@@ -34,12 +34,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def load_config():
+def load_bot_state.config():
     """Загрузка конфигурации бота"""
     try:
-        with open('bot_config.json', 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        return config
+        with open('bot_bot_state.config.json', 'r', encoding='utf-8') as f:
+            bot_state.config = json.load(f)
+        return bot_state.config
     except Exception as e:
         logger.error(f"Ошибка загрузки конфигурации: {e}")
         return None
@@ -241,19 +241,19 @@ def prepare_ml_features(df):
 
 def analyze_coin_signal_advanced_ema(symbol):
     """Анализ монеты с использованием продвинутой EMA логики"""
-    global ema_analyzer, ml_trainer
+    global bot_state.ema_analyzer, bot_state.ml_trainer
     
     try:
         # Очищаем символ от дублирования USDT
         clean_symbol = symbol.replace(':USDT', '') if ':USDT' in symbol else symbol
         
         # Инициализация анализаторов
-        if ema_analyzer is None:
-            ema_analyzer = AdvancedEMAAnalyzer()
+        if bot_state.ema_analyzer is None:
+            bot_state.ema_analyzer = AdvancedEMAAnalyzer()
         
-        if ml_trainer is None:
-            ml_trainer = AdvancedMLTrainer()
-            ml_trainer.load_models()  # Загружаем обученные модели
+        if bot_state.ml_trainer is None:
+            bot_state.ml_trainer = AdvancedMLTrainer()
+            bot_state.ml_trainer.load_models()  # Загружаем обученные модели
         
         logger.info(f"📊 Анализирую {symbol} с продвинутой EMA логикой...")
         
@@ -277,7 +277,7 @@ def analyze_coin_signal_advanced_ema(symbol):
             }
         
         # Анализ с продвинутой EMA логикой и ML
-        ema_analysis = ema_analyzer.analyze_coin(symbol, ohlcv_data, ml_trainer)
+        ema_analysis = bot_state.ema_analyzer.analyze_coin(symbol, ohlcv_data, bot_state.ml_trainer)
         
         # Получение текущей цены
         current_price = ema_analysis.get('current_price', 0)
@@ -642,16 +642,28 @@ def analyze_coin_signal(symbol):
         
         return None
 
-# Глобальные переменные
-current_coin = "BTC/USDT"
-available_pairs = []
-config = None
-application = None
+# Класс для управления состоянием бота
+class BotState:
+    def __init__(self):
+        self.bot_state.current_coin = "BTC/USDT"
+        self.bot_state.available_pairs = []
+        self.bot_state.config = None
+        self.bot_state.application = None
+        self.bot_state.ema_analyzer = None
+        self.bot_state.ml_trainer = None
+        self.bot_state.shooting_predictor = None
+    
+    def initialize(self):
+        """Инициализация состояния бота"""
+        self.bot_state.config = load_bot_state.config()
+        if self.bot_state.config:
+            self.bot_state.ema_analyzer = AdvancedEMAAnalyzer()
+            self.bot_state.ml_trainer = AdvancedMLTrainer()
+            self.bot_state.shooting_predictor = ShootingStarPredictor()
+            logger.info("✅ Состояние бота инициализировано")
 
-# Новые анализаторы
-ema_analyzer = None
-ml_trainer = None
-shooting_predictor = None
+# Глобальный экземпляр состояния
+bot_state = BotState()
 
 def create_advanced_trading_chart(symbol, df, signal_data):
     """Создание продвинутого графика в стиле TradingView"""
@@ -751,9 +763,9 @@ def create_advanced_trading_chart(symbol, df, signal_data):
         return None
 
 # Функция для получения списка доступных монет с Binance
-async def get_available_pairs():
+async def get_bot_state.available_pairs():
     """Получает список популярных монет с Binance"""
-    global available_pairs
+    global bot_state.available_pairs
     try:
         logger.info("🔍 Получаю список монет с Binance...")
         
@@ -773,24 +785,24 @@ async def get_available_pairs():
                 usdt_pairs.append(symbol)
         
         # Сортируем по популярности (все доступные USDT пары)
-        available_pairs = sorted(usdt_pairs)
-        logger.info(f"✅ Найдено {len(available_pairs)} монет с Binance")
-        return available_pairs
+        bot_state.available_pairs = sorted(usdt_pairs)
+        logger.info(f"✅ Найдено {len(bot_state.available_pairs)} монет с Binance")
+        return bot_state.available_pairs
         
     except Exception as e:
         logger.error(f"❌ Ошибка получения монет с Binance: {e}")
         # Fallback на стандартный список
-        available_pairs = [
+        bot_state.available_pairs = [
             'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT',
             'XRP/USDT', 'DOT/USDT', 'AVAX/USDT', 'MATIC/USDT', 'LINK/USDT',
             'UNI/USDT', 'LTC/USDT', 'ATOM/USDT', 'FTM/USDT', 'ALGO/USDT',
             'VET/USDT', 'ICP/USDT', 'FIL/USDT', 'TRX/USDT', 'ETC/USDT'
         ]
-        return available_pairs
+        return bot_state.available_pairs
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start с красивым меню"""
-    global current_coin
+    # Используем состояние бота
     
     keyboard = [
         [InlineKeyboardButton("📊 Статус системы", callback_data="menu_status")],
@@ -807,7 +819,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_message = f"""
 🤖 **Binance Trading Bot с ML сигналами!**
 
-🪙 **Текущая монета:** {current_coin}
+🪙 **Текущая монета:** {bot_state.current_coin}
 
 **Выберите действие из меню ниже:**
     """
@@ -816,7 +828,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик кнопок меню"""
-    global current_coin
+    # Используем состояние бота
     
     query = update.callback_query
     await query.answer()
@@ -873,7 +885,7 @@ async def handle_status_menu(query, context):
         status_message = f"""
 📊 **Статус системы**
 
-🪙 **Текущая монета:** {current_coin}
+🪙 **Текущая монета:** {bot_state.current_coin}
 ⏰ **Время:** {datetime.now().strftime('%H:%M:%S')}
 🔗 **API:** Binance (ccxt)
 
@@ -881,8 +893,8 @@ async def handle_status_menu(query, context):
 /start - Главное меню
 /status - Статус системы
 /coins - Список монет
-/signals - Сигналы для {current_coin}
-/analyze - Анализ {current_coin}
+/signals - Сигналы для {bot_state.current_coin}
+/analyze - Анализ {bot_state.current_coin}
 /search - Поиск монет
         """
         
@@ -897,11 +909,11 @@ async def handle_coins_menu(query, context):
     """Обработка кнопки Выбор монет"""
     try:
         # Получаем список доступных пар с Binance
-        if not available_pairs:
-            await get_available_pairs()
+        if not bot_state.available_pairs:
+            await get_bot_state.available_pairs()
         
         # Используем реальные пары с Binance
-        popular_coins = available_pairs[:20]  # Первые 20 пар
+        popular_coins = bot_state.available_pairs[:20]  # Первые 20 пар
         
         keyboard = []
         for i in range(0, len(popular_coins), 2):
@@ -915,7 +927,7 @@ async def handle_coins_menu(query, context):
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        message = f"🪙 **Выберите монету для анализа (Binance):**\n\n📊 Доступно {len(available_pairs)} монет"
+        message = f"🪙 **Выберите монету для анализа (Binance):**\n\n📊 Доступно {len(bot_state.available_pairs)} монет"
         await query.edit_message_text(message, reply_markup=reply_markup)
     except Exception as e:
         await query.edit_message_text(f"❌ Ошибка получения списка монет: {str(e)}")
@@ -923,9 +935,9 @@ async def handle_coins_menu(query, context):
 async def handle_signals_menu_new(query, context):
     """Обработка кнопки Последние сигналы (новая версия - отправляет новое сообщение)"""
     try:
-        signal_data = analyze_coin_signal_advanced_ema(current_coin)
+        signal_data = analyze_coin_signal_advanced_ema(bot_state.current_coin)
         if not signal_data:
-            await query.message.reply_text(f"❌ Ошибка анализа {current_coin}")
+            await query.message.reply_text(f"❌ Ошибка анализа {bot_state.current_coin}")
             return
         
         # Проверяем, является ли это ошибкой "монета не найдена"
@@ -936,12 +948,12 @@ async def handle_signals_menu_new(query, context):
         # Создание графика (только если есть данные)
         chart_buffer = None
         if signal_data.get('df') is not None:
-            chart_buffer = create_advanced_trading_chart(current_coin, signal_data['df'], signal_data)
+            chart_buffer = create_advanced_trading_chart(bot_state.current_coin, signal_data['df'], signal_data)
         
         if chart_buffer:
             # Отправка графика с подписью
             message = f"""
-📈 **Сигнал для {current_coin}**
+📈 **Сигнал для {bot_state.current_coin}**
 
 {signal_data['signal_type']} - {signal_data['strength_text']}
 
@@ -967,7 +979,7 @@ async def handle_signals_menu_new(query, context):
         else:
             # Fallback без графика
             message = f"""
-📈 **Сигнал для {current_coin}**
+📈 **Сигнал для {bot_state.current_coin}**
 
 {signal_data['signal_type']} - {signal_data['strength_text']}
 
@@ -1039,9 +1051,9 @@ async def handle_shooting_stars_menu(query, context):
 
 async def handle_coin_selection(query, context):
     """Обработка выбора монеты"""
-    global current_coin
+    # Используем состояние бота
     coin = query.data.replace("select_", "")
-    current_coin = coin
+    bot_state.current_coin = coin
     
     # Отправляем новое сообщение вместо редактирования
     await query.message.reply_text(f"✅ Выбрана монета: {coin}")
@@ -1052,31 +1064,31 @@ async def handle_coin_selection(query, context):
 
 async def handle_find_shooting_stars(query, context):
     """Поиск стреляющих монет с помощью продвинутого анализа"""
-    global shooting_predictor
+    global bot_state.shooting_predictor
     
     try:
         # Инициализируем предиктор если еще не инициализирован
-        if shooting_predictor is None:
-            shooting_predictor = ShootingStarPredictor()
+        if bot_state.shooting_predictor is None:
+            bot_state.shooting_predictor = ShootingStarPredictor()
         
         # Отправляем сообщение о начале анализа
         await query.edit_message_text("🔮 **Поиск стреляющих монет...**\n\n⏳ Анализирую все монеты на Binance...")
         
         # Получаем список всех монет
-        available_pairs = await get_available_pairs()
+        bot_state.available_pairs = await get_bot_state.available_pairs()
         
         # Проверяем, что список не пустой
-        if not available_pairs:
+        if not bot_state.available_pairs:
             await query.edit_message_text("❌ Не удалось получить список монет с Binance")
             return
         
         # Ограничиваем анализ первыми 50 монетами для скорости
-        pairs_to_analyze = available_pairs[:50]
+        pairs_to_analyze = bot_state.available_pairs[:50]
         
         logger.info(f"🚀 Начинаю поиск стреляющих монет среди {len(pairs_to_analyze)} монет")
         
         # Используем предиктор для поиска стреляющих звезд
-        shooting_stars = shooting_predictor.find_shooting_stars(pairs_to_analyze, min_probability=0.4)
+        shooting_stars = bot_state.shooting_predictor.find_shooting_stars(pairs_to_analyze, min_probability=0.4)
         
         # Формируем результат
         if shooting_stars:
@@ -1376,7 +1388,7 @@ def prepare_lstm_features(df):
 
 async def back_to_main_menu(query, context):
     """Возврат в главное меню"""
-    global current_coin
+    # Используем состояние бота
     
     keyboard = [
         [InlineKeyboardButton("📊 Статус системы", callback_data="menu_status")],
@@ -1390,7 +1402,7 @@ async def back_to_main_menu(query, context):
     welcome_message = f"""
 🤖 **Binance Trading Bot с ML сигналами!**
 
-🪙 **Текущая монета:** {current_coin}
+🪙 **Текущая монета:** {bot_state.current_coin}
 
 **Выберите действие из меню ниже:**
     """
@@ -1428,8 +1440,8 @@ async def set_coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif not coin.endswith('/USDT'):
             coin += '/USDT'
         
-        global current_coin
-        current_coin = coin
+        # Используем состояние бота
+        bot_state.current_coin = coin
         
         # Устанавливаем монету без проверки в списке
         await update.message.reply_text(
@@ -1444,11 +1456,11 @@ async def set_coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /analyze для анализа текущей монеты"""
     try:
-        await update.message.reply_text(f"🔍 Анализирую {current_coin}...")
+        await update.message.reply_text(f"🔍 Анализирую {bot_state.current_coin}...")
         
-        signal_data = analyze_coin_signal_advanced_ema(current_coin)
+        signal_data = analyze_coin_signal_advanced_ema(bot_state.current_coin)
         if not signal_data:
-            await update.message.reply_text(f"❌ Ошибка анализа {current_coin}")
+            await update.message.reply_text(f"❌ Ошибка анализа {bot_state.current_coin}")
             return
         
         # Проверяем, является ли это ошибкой "монета не найдена"
@@ -1459,12 +1471,12 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Создание графика (только если есть данные)
         chart_buffer = None
         if signal_data.get('df') is not None:
-            chart_buffer = create_advanced_trading_chart(current_coin, signal_data['df'], signal_data)
+            chart_buffer = create_advanced_trading_chart(bot_state.current_coin, signal_data['df'], signal_data)
         
         if chart_buffer:
             # Отправка графика с подписью
             message = f"""
-📈 **Сигнал для {current_coin}**
+📈 **Сигнал для {bot_state.current_coin}**
 
 {signal_data['signal_type']} - {signal_data['strength_text']}
 
@@ -1486,7 +1498,7 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # Fallback без графика
             message = f"""
-📈 **Сигнал для {current_coin}**
+📈 **Сигнал для {bot_state.current_coin}**
 
 {signal_data['signal_type']} - {signal_data['strength_text']}
 
@@ -1523,8 +1535,8 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Поиск в доступных парах
         matching_pairs = []
-        if available_pairs:
-            matching_pairs = [pair for pair in available_pairs if search_term in pair]
+        if bot_state.available_pairs:
+            matching_pairs = [pair for pair in bot_state.available_pairs if search_term in pair]
         
         if matching_pairs:
             # Создаем кнопки для найденных пар
@@ -1577,7 +1589,7 @@ async def test_binance_command(update: Update, context: ContextTypes.DEFAULT_TYP
 - Символ: {test_symbol}
 - Свечей получено: {len(df)}
 - Последняя цена: ${latest_price:.2f}
-- Доступно монет: {len(available_pairs)}
+- Доступно монет: {len(bot_state.available_pairs)}
 
 🕐 **Последние данные:**
 - Время: {latest_time.strftime('%H:%M:%S')}
@@ -1681,13 +1693,12 @@ async def handle_ml_models_status(query, context):
 
 def main():
     """Основная функция"""
-    global config, application
     print("🤖 Запуск Binance ML Telegram Bot")
     print("🔄 Используем Binance API через ccxt")
     
-    # Загружаем конфигурацию
-    config = load_config()
-    if not config:
+    # Инициализируем состояние бота
+    bot_state.initialize()
+    if not bot_state.config:
         print("❌ Не удалось загрузить конфигурацию")
         return
     
@@ -1697,31 +1708,31 @@ def main():
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(get_available_pairs())
-        print(f"✅ Загружено {len(available_pairs)} монет с Binance")
+        loop.run_until_complete(get_bot_state.available_pairs())
+        print(f"✅ Загружено {len(bot_state.available_pairs)} монет с Binance")
     except Exception as e:
         print(f"⚠️ Ошибка загрузки монет с Binance: {e}")
         print("🔄 Использую стандартный список")
     
     # Создаем приложение
-    application = Application.builder().token(config["telegram_token"]).build()
+    bot_state.application = Application.builder().token(bot_state.config["telegram_token"]).build()
     
     
     # Добавляем обработчики
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("set_coin", set_coin_command))
-    application.add_handler(CommandHandler("analyze", analyze_command))
-    application.add_handler(CommandHandler("signals", signals_command))
-    application.add_handler(CommandHandler("search", search_command))
-    application.add_handler(CommandHandler("test_binance", test_binance_command))
-    application.add_handler(CallbackQueryHandler(button_callback))
+    bot_state.application.add_handler(CommandHandler("start", start_command))
+    bot_state.application.add_handler(CommandHandler("set_coin", set_coin_command))
+    bot_state.application.add_handler(CommandHandler("analyze", analyze_command))
+    bot_state.application.add_handler(CommandHandler("signals", signals_command))
+    bot_state.application.add_handler(CommandHandler("search", search_command))
+    bot_state.application.add_handler(CommandHandler("test_binance", test_binance_command))
+    bot_state.application.add_handler(CallbackQueryHandler(button_callback))
     
     print("✅ Бот настроен успешно")
     print("🚀 Запускаю бота...")
     
     # Запускаем бота
     print("⏰ Планировщик задач будет запущен после старта бота")
-    application.run_polling()
+    bot_state.application.run_polling()
 
 if __name__ == "__main__":
     main()

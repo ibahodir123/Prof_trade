@@ -61,14 +61,16 @@ class ShootingStarPredictor:
             recent_volume = df['volume'].iloc[-3:].mean()
             volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1
             
-            # 3. Анализ волатильности
-            volatility = df['close'].iloc[-10:].std() / df['close'].iloc[-10:].mean()
+            # 3. Анализ волатильности (ИСПРАВЛЕНО - защита от деления на ноль)
+            price_mean = df['close'].iloc[-10:].mean()
+            volatility = df['close'].iloc[-10:].std() / price_mean if price_mean > 0 else 0.0
             
             # 4. Анализ EMA сближения
             ema_distance = abs(ema20 - ema50) / current_price
             
-            # 5. Анализ поддержки
-            support_strength = (current_price - recent_low) / (recent_high - recent_low)
+            # 5. Анализ поддержки (ИСПРАВЛЕНО - защита от деления на ноль)
+            range_size = recent_high - recent_low
+            support_strength = (current_price - recent_low) / range_size if range_size > 0 else 0.5
             
             # 6. Анализ тренда
             price_change_5 = (current_price - df['close'].iloc[-5]) / df['close'].iloc[-5]
@@ -79,44 +81,50 @@ class ShootingStarPredictor:
             conditions = []
             
             # Идеальные условия для выстрела
+            
+            # 1. Узкая консолидация (цена сжалась в узком диапазоне)
             if consolidation_range < 0.05:  # Узкая консолидация
                 probability += 0.2
-                conditions.append(" Узкая консолидация")
+                conditions.append("✅ Узкая консолидация")
             else:
-                conditions.append(f" Широкая консолидация ({consolidation_range:.3f})")
+                conditions.append(f"❌ Широкая консолидация ({consolidation_range:.3f})")
             
-            if volume_ratio < 0.8:  # Низкий объем
+            # 2. ИСПРАВЛЕНО - Умеренный объем (накопление перед выстрелом)
+            if 0.5 <= volume_ratio <= 1.5:  # Умеренный объем (накопление)
                 probability += 0.2
-                conditions.append(" Низкий объем")
+                conditions.append("✅ Умеренный объем (накопление)")
             else:
-                conditions.append(f" Высокий объем ({volume_ratio:.2f})")
+                conditions.append(f"❌ Экстремальный объем ({volume_ratio:.2f})")
             
+            # 3. Низкая волатильность (сжатие перед выстрелом)
             if volatility < 0.03:  # Низкая волатильность
                 probability += 0.2
-                conditions.append(" Низкая волатильность")
+                conditions.append("✅ Низкая волатильность")
             else:
-                conditions.append(f" Высокая волатильность ({volatility:.3f})")
+                conditions.append(f"❌ Высокая волатильность ({volatility:.3f})")
             
+            # 4. EMA сближены (готовность к движению)
             if ema_distance < 0.02:  # EMA близко
                 probability += 0.2
-                conditions.append(" EMA сближены")
+                conditions.append("✅ EMA сближены")
             else:
-                conditions.append(f" EMA далеко ({ema_distance:.3f})")
+                conditions.append(f"❌ EMA далеко ({ema_distance:.3f})")
             
-            if support_strength > 0.3:  # Хорошая поддержка
+            # 5. ИСПРАВЛЕНО - Близко к поддержке (хорошо для отскока)
+            if support_strength < 0.7:  # Близко к поддержке (хорошо для отскока)
                 probability += 0.2
-                conditions.append(" Сильная поддержка")
+                conditions.append("✅ Близко к поддержке")
             else:
-                conditions.append(f" Слабая поддержка ({support_strength:.2f})")
+                conditions.append(f"❌ Далеко от поддержки ({support_strength:.2f})")
             
             # Дополнительные факторы
             if price_change_5 > -0.02:  # Не падает сильно
                 probability += 0.1
-                conditions.append(" Стабильная цена")
+                conditions.append("✅ Стабильная цена")
             
             if current_price > ema20 > ema50:  # Восходящий тренд
                 probability += 0.1
-                conditions.append(" Восходящий тренд")
+                conditions.append("✅ Восходящий тренд")
             
             # Ограничиваем вероятность
             probability = min(1.0, probability)
@@ -142,12 +150,24 @@ class ShootingStarPredictor:
         """Находит монеты с высоким потенциалом выстрела"""
         shooting_stars = []
         
+        # Дедуплицируем символы (убираем дубликаты)
+        unique_symbols = []
+        seen = set()
         for symbol in symbols:
+            # Нормализуем символ (убираем :USDT суффикс)
+            normalized = symbol.replace(':USDT', '')
+            if normalized not in seen:
+                unique_symbols.append(symbol)
+                seen.add(normalized)
+        
+        logger.info(f"📊 Анализирую {len(unique_symbols)} уникальных символов (из {len(symbols)} исходных)")
+        
+        for symbol in unique_symbols:
             try:
                 result = self.analyze_shooting_potential(symbol)
                 if result and result['probability'] >= min_probability:
                     shooting_stars.append(result)
-                    logger.info(f" {symbol}: вероятность выстрела {result['probability']:.2f}")
+                    logger.info(f"🚀 {symbol}: вероятность выстрела {result['probability']:.2f}")
             except Exception as e:
                 logger.error(f"Ошибка анализа {symbol}: {e}")
                 continue
@@ -181,7 +201,7 @@ if __name__ == "__main__":
     # Ищем стреляющие звезды
     shooting_stars = predictor.find_shooting_stars(symbols)
     
-    print(f"\n Найдено {len(shooting_stars)} потенциальных стреляющих звезд:")
+    print(f"\n🚀 Найдено {len(shooting_stars)} потенциальных стреляющих звезд:")
     for star in shooting_stars:
         print(f"\n{star['symbol']} - Вероятность: {star['probability']:.2f}")
         print(f"Цена: ${star['current_price']:.6f}")

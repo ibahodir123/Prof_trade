@@ -12,9 +12,34 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Константы для анализа трендов
+class TrendConstants:
+    # Пороги для определения тренда
+    UPTREND_EMA20_THRESHOLD = 0.02      # 2% рост EMA 20
+    UPTREND_EMA50_THRESHOLD = 0.01      # 1% рост EMA 50
+    DOWNTREND_EMA20_THRESHOLD = -0.02   # 2% падение EMA 20
+    DOWNTREND_EMA50_THRESHOLD = -0.01   # 1% падение EMA 50
+    
+    # Пороги для определения фазы рынка
+    MARKET_PHASE_THRESHOLD = 0.01       # 1% изменение цены для импульса
+    
+    # Минимальное количество свечей для анализа
+    MIN_CANDLES_TREND = 10
+    MIN_CANDLES_PHASE = 5
+    
+    # Типы трендов
+    TREND_DOWN = 0
+    TREND_SIDEWAYS = 1
+    TREND_UP = 2
+    
+    # Фазы рынка
+    PHASE_CORRECTION = 0
+    PHASE_IMPULSE = 1
+
 class AdvancedEMAAnalyzer:
     def __init__(self):
         self.ema_periods = [20, 50, 100]
+        self.constants = TrendConstants()
 
     def calculate_ema_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Вычисление всех EMA признаков для ML"""
@@ -54,26 +79,29 @@ class AdvancedEMAAnalyzer:
 
     def _determine_trend_type(self, df: pd.DataFrame) -> int:
         """Определение типа тренда: 0-нисходящий, 1-боковой, 2-восходящий"""
-        if len(df) < 10:
-            return 1
+        if len(df) < self.constants.MIN_CANDLES_TREND:
+            return self.constants.TREND_SIDEWAYS
 
-        ema20_trend = df['ema_20'].iloc[-1] - df['ema_20'].iloc[-10]
-        ema50_trend = df['ema_50'].iloc[-1] - df['ema_50'].iloc[-10]
+        ema20_trend = df['ema_20'].iloc[-1] - df['ema_20'].iloc[-self.constants.MIN_CANDLES_TREND]
+        ema50_trend = df['ema_50'].iloc[-1] - df['ema_50'].iloc[-self.constants.MIN_CANDLES_TREND]
 
-        if ema20_trend > 0.02 and ema50_trend > 0.01:
-            return 2  # Восходящий
-        elif ema20_trend < -0.02 and ema50_trend < -0.01:
-            return 0  # Нисходящий
+        if (ema20_trend > self.constants.UPTREND_EMA20_THRESHOLD and 
+            ema50_trend > self.constants.UPTREND_EMA50_THRESHOLD):
+            return self.constants.TREND_UP  # Восходящий
+        elif (ema20_trend < self.constants.DOWNTREND_EMA20_THRESHOLD and 
+              ema50_trend < self.constants.DOWNTREND_EMA50_THRESHOLD):
+            return self.constants.TREND_DOWN  # Нисходящий
         else:
-            return 1  # Боковой
+            return self.constants.TREND_SIDEWAYS  # Боковой
 
     def _determine_market_phase(self, df: pd.DataFrame) -> int:
         """Определение фазы рынка: 0-коррекция, 1-импульс"""
-        if len(df) < 5:
-            return 1
+        if len(df) < self.constants.MIN_CANDLES_PHASE:
+            return self.constants.PHASE_IMPULSE
 
-        price_change = (df['close'].iloc[-1] - df['close'].iloc[-5]) / df['close'].iloc[-5]
-        return 1 if abs(price_change) > 0.01 else 0
+        price_change = (df['close'].iloc[-1] - df['close'].iloc[-self.constants.MIN_CANDLES_PHASE]) / df['close'].iloc[-self.constants.MIN_CANDLES_PHASE]
+        return (self.constants.PHASE_IMPULSE if abs(price_change) > self.constants.MARKET_PHASE_THRESHOLD 
+                else self.constants.PHASE_CORRECTION)
 
     def analyze_coin(self, symbol: str, ohlcv_data: List, ml_trainer=None) -> Dict[str, Any]:
         """Анализ монеты с продвинутой EMA логикой и ML"""

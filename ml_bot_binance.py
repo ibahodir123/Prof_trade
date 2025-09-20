@@ -34,12 +34,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def load_bot_state.config():
+def load_config():
     """Загрузка конфигурации бота"""
     try:
-        with open('bot_bot_state.config.json', 'r', encoding='utf-8') as f:
-            bot_state.config = json.load(f)
-        return bot_state.config
+        with open('bot_config.json', 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        return config
     except Exception as e:
         logger.error(f"Ошибка загрузки конфигурации: {e}")
         return None
@@ -241,7 +241,7 @@ def prepare_ml_features(df):
 
 def analyze_coin_signal_advanced_ema(symbol):
     """Анализ монеты с использованием продвинутой EMA логики"""
-    global bot_state.ema_analyzer, bot_state.ml_trainer
+    # Используем bot_state напрямую
     
     try:
         # Очищаем символ от дублирования USDT
@@ -655,11 +655,11 @@ class BotState:
     
     def initialize(self):
         """Инициализация состояния бота"""
-        self.bot_state.config = load_bot_state.config()
-        if self.bot_state.config:
-            self.bot_state.ema_analyzer = AdvancedEMAAnalyzer()
-            self.bot_state.ml_trainer = AdvancedMLTrainer()
-            self.bot_state.shooting_predictor = ShootingStarPredictor()
+        self.config = load_config()
+        if self.config:
+            self.ema_analyzer = AdvancedEMAAnalyzer()
+            self.ml_trainer = AdvancedMLTrainer()
+            self.shooting_predictor = ShootingStarPredictor()
             logger.info("✅ Состояние бота инициализировано")
 
 # Глобальный экземпляр состояния
@@ -763,9 +763,9 @@ def create_advanced_trading_chart(symbol, df, signal_data):
         return None
 
 # Функция для получения списка доступных монет с Binance
-async def get_bot_state.available_pairs():
+async def get_available_pairs():
     """Получает список популярных монет с Binance"""
-    global bot_state.available_pairs
+    # Используем bot_state напрямую
     try:
         logger.info("🔍 Получаю список монет с Binance...")
         
@@ -1064,7 +1064,7 @@ async def handle_coin_selection(query, context):
 
 async def handle_find_shooting_stars(query, context):
     """Поиск стреляющих монет с помощью продвинутого анализа"""
-    global bot_state.shooting_predictor
+    # Используем bot_state напрямую
     
     try:
         # Инициализируем предиктор если еще не инициализирован

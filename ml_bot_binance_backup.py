@@ -1044,6 +1044,15 @@ async def handle_signals_menu_new(query, context):
 🎯 **Take Profit:** ${signal_data['take_profit']:.8f}
 🛡️ **Stop Loss:** ${signal_data['stop_loss']:.8f}
                 """
+            elif "ОЖИДАНИЕ" in signal_data['signal_type']:
+                message += f"""
+
+💡 **Что означает ОЖИДАНИЕ:**
+• ❌ **НЕ входить** в позицию сейчас
+• ⏳ **Ждать** лучшего момента для входа
+• 📊 **Мониторить** цену и технические показатели
+• 🎯 **Дождаться** более благоприятных условий
+    """
             
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1373,7 +1382,7 @@ async def handle_ema_coin_analysis(query, context, symbol):
         # Выполняем EMA анализ
         signal_data = analyze_coin_signal_advanced_ema(symbol)
         
-        п_data.get('error'):
+        if signal_data.get('error'):
             await query.edit_message_text(f"❌ Ошибка анализа {symbol}: {signal_data['error']}")
             return
         
@@ -1612,7 +1621,20 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Отправка графика с подписью
             message = f"""
 📈 **Сигнал для {bot_state.current_coin}**
+        if signal_data['signal_type'] == "�� LONG":
+            message += f"""
+🎯 **Take Profit:** ${signal_data['take_profit']:.8f}
+��️ **Stop Loss:** ${signal_data['stop_loss']:.8f}
+    """
+        elif "ОЖИДАНИЕ" in signal_data['signal_type']:
+        message += f"""
 
+💡 **Что означает ОЖИДАНИЕ:**
+• ❌ **НЕ входить** в позицию сейчас
+• ⏳ **Ждать** лучшего момента для входа
+• 📊 **Мониторить** цену и технические показатели
+• �� **Дождаться** более благоприятных условий
+    """
 {signal_data['signal_type']} - {signal_data['strength_text']}
 
 💰 **Цена входа:** ${signal_data['entry_price']:.8f}

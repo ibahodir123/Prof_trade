@@ -754,26 +754,6 @@ def create_advanced_trading_chart(symbol, df, signal_data):
         
         # Последние 100 свечей для лучшей видимости
         recent_df = df.tail(100)
-        
-        # Проверяем наличие EMA колонок в recent_df
-        if 'ema_20' not in recent_df.columns:
-            logger.error(f"❌ Отсутствует колонка ema_20 в recent_df для {symbol}")
-            logger.error(f"   Доступные колонки в recent_df: {list(recent_df.columns)}")
-            
-            # Попробуем создать EMA колонки в recent_df
-            logger.info(f"🔧 Создаю EMA колонки в recent_df для {symbol}")
-            recent_df['ema_20'] = recent_df['close'].ewm(span=20).mean()
-            recent_df['ema_50'] = recent_df['close'].ewm(span=50).mean()
-            recent_df['ema_100'] = recent_df['close'].ewm(span=100).mean()
-            # Расчет RSI для recent_df
-            delta_rsi = recent_df['close'].diff()
-            gain_rsi = (delta_rsi.where(delta_rsi > 0, 0)).rolling(window=14).mean()
-            loss_rsi = (-delta_rsi.where(delta_rsi < 0, 0)).rolling(window=14).mean()
-            rs_rsi = gain_rsi / loss_rsi
-            rsi = 100 - (100 / (1 + rs_rsi))
-            recent_df["rsi"] = rsi  # Добавляем RSI в recent_df
-            logger.info(f"✅ EMA колонки созданы в recent_df: {list(recent_df.columns)}")
-            
         x_pos = range(len(recent_df))
         
         # Свечи

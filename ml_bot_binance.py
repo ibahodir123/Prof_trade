@@ -16,8 +16,8 @@ import joblib
 from datetime import datetime
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from advanced_bot_state.ema_analyzer import AdvancedEMAAnalyzer
-from advanced_bot_state.ml_trainer import AdvancedMLTrainer
+from advanced_ema_analyzer import AdvancedEMAAnalyzer
+from advanced_ml_trainer import AdvancedMLTrainer
 from shooting_star_predictor import ShootingStarPredictor
 
 # Настройка matplotlib для работы без GUI
@@ -645,13 +645,13 @@ def analyze_coin_signal(symbol):
 # Класс для управления состоянием бота
 class BotState:
     def __init__(self):
-        self.bot_state.current_coin = "BTC/USDT"
-        self.bot_state.available_pairs = []
-        self.bot_state.config = None
-        self.bot_state.application = None
-        self.bot_state.ema_analyzer = None
-        self.bot_state.ml_trainer = None
-        self.bot_state.shooting_predictor = None
+        self.current_coin = "BTC/USDT"
+        self.available_pairs = []
+        self.config = None
+        self.application = None
+        self.ema_analyzer = None
+        self.ml_trainer = None
+        self.shooting_predictor = None
     
     def initialize(self):
         """Инициализация состояния бота"""
@@ -910,7 +910,7 @@ async def handle_coins_menu(query, context):
     try:
         # Получаем список доступных пар с Binance
         if not bot_state.available_pairs:
-            await get_bot_state.available_pairs()
+            await get_available_pairs()
         
         # Используем реальные пары с Binance
         popular_coins = bot_state.available_pairs[:20]  # Первые 20 пар
@@ -1075,7 +1075,7 @@ async def handle_find_shooting_stars(query, context):
         await query.edit_message_text("🔮 **Поиск стреляющих монет...**\n\n⏳ Анализирую все монеты на Binance...")
         
         # Получаем список всех монет
-        bot_state.available_pairs = await get_bot_state.available_pairs()
+        bot_state.available_pairs = await get_available_pairs()
         
         # Проверяем, что список не пустой
         if not bot_state.available_pairs:
@@ -1708,14 +1708,14 @@ def main():
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(get_bot_state.available_pairs())
+        loop.run_until_complete(get_available_pairs())
         print(f"✅ Загружено {len(bot_state.available_pairs)} монет с Binance")
     except Exception as e:
         print(f"⚠️ Ошибка загрузки монет с Binance: {e}")
         print("🔄 Использую стандартный список")
     
     # Создаем приложение
-    bot_state.application = Application.builder().token(bot_state.config["telegram_token"]).build()
+    bot_state.application = Application.builder().token(bot_state.config["telegram"]["bot_token"]).build()
     
     
     # Добавляем обработчики

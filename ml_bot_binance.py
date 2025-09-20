@@ -16,8 +16,8 @@ import joblib
 from datetime import datetime
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from advanced_bot_state.ema_analyzer import AdvancedEMAAnalyzer
-from advanced_bot_state.ml_trainer import AdvancedMLTrainer
+from advanced_ema_analyzer import AdvancedEMAAnalyzer
+from advanced_ml_trainer import AdvancedMLTrainer
 from shooting_star_predictor import ShootingStarPredictor
 
 # Настройка matplotlib для работы без GUI

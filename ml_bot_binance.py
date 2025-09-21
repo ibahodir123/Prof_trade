@@ -36,8 +36,17 @@ logger = logging.getLogger(__name__)
 def load_config():
     """Загрузка конфигурации бота"""
     try:
-        with open('bot_config.json', 'r', encoding='utf-8') as f:
+        # Сначала пытаемся загрузить локальную конфигурацию для разработки
+        config_file = 'bot_config_local.json' if os.path.exists('bot_config_local.json') else 'bot_config.json'
+        
+        with open(config_file, 'r', encoding='utf-8') as f:
             config = json.load(f)
+        
+        # Проверяем, включен ли локальный режим разработки
+        if config.get('local_development', {}).get('enabled', False):
+            logger.info("🔧 Локальный режим разработки активирован")
+            logger.info("🚫 Telegram API отключен для избежания конфликтов")
+        
         return config
     except Exception as e:
         logger.error(f"Ошибка загрузки конфигурации: {e}")
@@ -70,9 +79,9 @@ def calculate_dynamic_percentages(signal_strength, signal_type):
     return profit_pct, loss_pct, strength_text
 
 def get_binance_data(symbol, timeframe='1h', limit=500):
-    """Получает данные с Binance через ccxt"""
+    """Получает свежие данные с Binance через ccxt"""
     try:
-        logger.info(f"📊 Получаю данные {symbol} с Binance...")
+        logger.info(f"📊 Получаю СВЕЖИЕ данные {symbol} с Binance...")
         
         # Инициализация Binance (только публичные данные)
         exchange = ccxt.binance({
@@ -134,7 +143,7 @@ def get_binance_data(symbol, timeframe='1h', limit=500):
         logger.error(f"❌ Ошибка получения данных {symbol} с Binance: {e}")
         return None
 
-def prepare_ml_features(df):
+def prepare_ml_features(df, symbol="unknown"):
     """Подготавливает все 36 признаков для ML модели"""
     try:
         # Проверяем наличие необходимых колонок
@@ -143,7 +152,23 @@ def prepare_ml_features(df):
         
         if missing_columns:
             logger.error(f"❌ Отсутствуют колонки: {missing_columns}")
-            return None
+            
+            # Попробуем создать EMA колонки на месте
+            if 'ema_20' in missing_columns:
+                logger.info(f"🔧 Создаю EMA колонки в prepare_ml_features для {symbol}")
+                df['ema_20'] = df['close'].ewm(span=20).mean()
+                df['ema_50'] = df['close'].ewm(span=50).mean()
+                df['ema_100'] = df['close'].ewm(span=100).mean()
+                logger.info(f"✅ EMA колонки созданы в prepare_ml_features")
+                
+                # Обновляем список отсутствующих колонок
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                
+                if missing_columns:
+                    logger.error(f"❌ Все еще отсутствуют колонки: {missing_columns}")
+                    return None
+            else:
+                return None
         
         # Создаем копию данных
         data = df[required_columns].copy()
@@ -347,17 +372,25 @@ def analyze_coin_signal_advanced_ema(symbol):
         # Получение текущей цены
         current_price = ema_analysis.get('current_price', 0)
         
-        # Расчет RSI
+        # Расчет RSI и EMA
         df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        
+        # Создаем EMA колонки для графика
+        df['ema_20'] = df['close'].ewm(span=20).mean()
+        df['ema_50'] = df['close'].ewm(span=50).mean()
+        df['ema_100'] = df['close'].ewm(span=100).mean()
+        
+        # Расчет RSI
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
+        df['rsi'] = rsi  # Добавляем RSI в DataFrame
         current_rsi = rsi.iloc[-1] if not rsi.empty else 50
         
         # Получаем данные из EMA анализа
-        signal_type = ema_analysis.get('signal', 'ОЖИДАНИЕ')
+        signal_type = ema_analysis.get('signal', '😴 ОЖИДАНИЕ')
         confidence = ema_analysis.get('confidence', 50.0)
         entry_prob = ema_analysis.get('ml_entry_prob', 0.0)
         exit_prob = ema_analysis.get('ml_exit_prob', 0.0)
@@ -476,7 +509,7 @@ def analyze_coin_signal(symbol):
             logger.info(f"📊 Подготавливаю данные для ML анализа...")
             
             # Подготавливаем все 36 признаков
-            features = prepare_ml_features(df)
+            features = prepare_ml_features(df, symbol)
             if features is None or features.empty:
                 logger.error(f"❌ Не удалось подготовить признаки для ML")
                 raise ValueError("Failed to prepare ML features")
@@ -574,7 +607,7 @@ def analyze_coin_signal(symbol):
                 max_detector = joblib.load('models/maximum_detector.pkl')
                 
                 # Подготавливаем данные для ML
-                features = prepare_ml_features(df)
+                features = prepare_ml_features(df, symbol)
                 if features is not None and not features.empty:
                     features_scaled = scaler.transform(features)
                     last_features = features_scaled[-1:].reshape(1, -1)
@@ -656,6 +689,9 @@ def analyze_coin_signal(symbol):
                 
                 # Простой анализ тренда
                 if latest_close > ema_20_latest > ema_50_latest:
+
+
+                    
                     signal_type = "🟢 LONG"
                     strength_text = "Простой анализ: восходящий тренд"
                     profit_pct, loss_pct, _ = calculate_dynamic_percentages(0.6, "LONG")
@@ -725,6 +761,8 @@ class BotState:
         self.ema_analyzer = None
         self.ml_trainer = None
         self.shooting_predictor = None
+        self.language = "ru"  # По умолчанию русский, "uz" для узбекского
+        self.custom_uzbek_explanations = {}  # Пользовательские объяснения на узбекском
     
     def initialize(self):
         """Инициализация состояния бота"""
@@ -740,9 +778,324 @@ class BotState:
 # Глобальный экземпляр состояния
 bot_state = BotState()
 
+# Словарь переводов на узбекский язык
+UZBEK_TRANSLATIONS = {
+    # Основные термины
+    "Сигнал": "Сигнал",
+    "LONG": "LONG",
+    "SHORT": "SHORT", 
+    "ОЖИДАНИЕ": "КУТИШ",
+    "Цена входа": "Кириш нархи",
+    "Take Profit": "Фойда олиш",
+    "Stop Loss": "Йўқотишни тўхтатиш",
+    "RSI": "RSI",
+    "ML статус": "ML холати",
+    "Анализ": "Таҳлил",
+    "Тренд": "Тренд",
+    "Фаза": "Фаза",
+    "Уверенность": "Ишонч",
+    "Вероятность": "Эҳтимоллик",
+    "Потенциал": "Потенциал",
+    "Прогноз": "Прогноз",
+    
+    # Объяснения сигналов
+    "Что означает ОЖИДАНИЕ": "КУТИШ нимани англатади",
+    "НЕ входить в позицию сейчас": "Ҳозирча позицияга кирманг",
+    "Ждать лучшего момента для входа": "Кириш учун яхши пайтни кутинг",
+    "Мониторить цену и технические показатели": "Нарх ва техник кўрсаткичларни кузатинг",
+    "Дождаться более благоприятных условий": "Яхширок шартларни кутинг",
+    
+    # EMA объяснения
+    "Восходящий тренд": "Юқорига йўналган тренд",
+    "Нисходящий тренд": "Пастга йўналган тренд", 
+    "Боковой тренд": "Қийма тренд",
+    "Импульс": "Импульс",
+    "Коррекция": "Тузатиш",
+    "Пересечение EMA": "EMA кесишиши",
+    "Приближение к EMA": "EMAга яқинлашув",
+    "Отскок от EMA": "EMAдан сакраш",
+    
+    # Сила сигнала
+    "Очень сильный": "Жуда кучли",
+    "Сильный": "Кучли", 
+    "Средний": "Ўртача",
+    "Слабый": "Суст",
+    "Падение": "Тушиб кетиш",
+    "Рост": "Ўсиш",
+    "Нет четкого сигнала": "Аниқ сигнал йўқ",
+    "Слабая уверенность": "Суст ишонч",
+    
+    # Технические термины
+    "Волатильность": "Волатиллик",
+    "Объем": "Ҳажм",
+    "Свечи": "Шам",
+    "График": "График",
+    "Индикатор": "Индикатор",
+    "Поддержка": "Қўллаб-қувватлаш",
+    "Сопротивление": "Қаршилик",
+    
+    # Статусы и сообщения
+    "МОНЕТА НЕ НАЙДЕНА": "ТАНГА ТОПИЛМАДИ",
+    "Ошибка анализа": "Таҳлил хатоси",
+    "Ошибка получения данных": "Маълумотларни олиш хатоси",
+    "Система готова": "Тизим тайёр",
+    "Анализирую": "Таҳлил қиламан",
+    "Обучаю модели": "Моделларни ўқитаман",
+    "Готово к использованию": "Фойдаланишга тайёр",
+    
+    # Меню и кнопки
+    "Статус системы": "Тизим холати",
+    "Выбор монет": "Тангаларни танлаш",
+    "Последние сигналы": "Охирги сигналлар",
+    "Анализ монеты": "Танга таҳлили",
+    "Поиск монет": "Тангаларни қидириш",
+    "Стреляющие монеты": "Отилган тангалар",
+    "EMA Анализ": "EMA Таҳлили",
+    "Обучение ML": "ML Ўқитиш",
+    "Назад": "Орқага",
+    "Контакты": "Алоқалар",
+    
+    # Контактная информация
+    "Разработчик": "Ишлаб чиқарувчи",
+    "Бот": "Бот",
+    "Связь": "Алоқа",
+    "Вопросы": "Саволлар",
+    "Предложения": "Таклифлар", 
+    "Сотрудничество": "Ҳамкорлик",
+    "Возможности бота": "Бот имкониятлари",
+    "Технологии": "Технологиялар",
+    "Точность": "Аниқлик",
+    "Покрытие": "Қамров",
+    
+    # Объяснения возможностей
+    "Анализ любых монет Binance": "Binanceнинг барча тангаларини таҳлил қилиш",
+    "Адаптивное ML обучение": "Мослашувчи ML ўқитиш",
+    "Автосигналы каждые 30 минут": "Ҳар 30 дақиқада автосигналлар",
+    "Стреляющие звезды": "Отилган юлдузлар",
+    "EMA анализ с ML предсказаниями": "ML бошоратлари билан EMA таҳлили",
+    "Machine Learning": "Машина ўрганиши",
+    "Binance API": "Binance API",
+    "Telegram Bot API": "Telegram Bot API",
+    "Python": "Python",
+    "pandas": "pandas",
+    "scikit-learn": "scikit-learn",
+    "Модели обучены на реальных данных": "Моделлар ҳақиқий маълумотлар асосида ўқитилган",
+    "Все 614+ USDT пар Binance": "Binanceнинг барча 614+ USDT жуфтлари",
+    "Спасибо за использование": "Фойдаланганингиз учун раҳмат",
+    
+    # Поиск и выбор
+    "Найдено": "Топилди",
+    "пар с": "жуфт",
+    "Выберите монету": "Тангани танланг",
+    "Доступно": "Мавжуд",
+    "монет": "танга",
+    "Популярные монеты": "Оммабоп тангалар",
+    "Поиск завершен": "Қидириш тугади",
+    "Стреляющих не найдено": "Отилган топилмади",
+    "Попробуйте позже": "Кейинроқ уриниб кўринг",
+    
+    # Объяснения анализа
+    "Проанализировано": "Таҳлил қилинди",
+    "Найдено стреляющих": "Отилган топилди",
+    "ТОП стреляющих монет": "ТОП отилган тангалар",
+    "Время анализа": "Таҳлил вақти",
+    "Нет монет с высокой вероятностью": "Юқори эҳтимолликдаги тангалар йўқ",
+    "Используйте обычный анализ": "Оддий таҳлилдан фойдаланинг"
+}
+
+# Словарь переводов на английский язык
+ENGLISH_TRANSLATIONS = {
+    # Основные термины
+    "Сигнал": "Signal",
+    "LONG": "LONG",
+    "SHORT": "SHORT", 
+    "ОЖИДАНИЕ": "WAITING",
+    "Цена входа": "Entry Price",
+    "Take Profit": "Take Profit",
+    "Stop Loss": "Stop Loss",
+    "RSI": "RSI",
+    "ML статус": "ML Status",
+    "Анализ": "Analysis",
+    "Тренд": "Trend",
+    "Фаза": "Phase",
+    "Уверенность": "Confidence",
+    "Вероятность": "Probability",
+    "Потенциал": "Potential",
+    "Прогноз": "Forecast",
+    
+    # Объяснения сигналов
+    "Что означает ОЖИДАНИЕ": "What WAITING means",
+    "НЕ входить в позицию сейчас": "DO NOT enter position now",
+    "Ждать лучшего момента для входа": "Wait for better entry moment",
+    "Мониторить цену и технические показатели": "Monitor price and technical indicators",
+    "Дождаться более благоприятных условий": "Wait for more favorable conditions",
+    
+    # EMA объяснения
+    "Восходящий тренд": "Uptrend",
+    "Нисходящий тренд": "Downtrend", 
+    "Боковой тренд": "Sideways trend",
+    "Импульс": "Impulse",
+    "Коррекция": "Correction",
+    "Пересечение EMA": "EMA crossover",
+    "Приближение к EMA": "Approaching EMA",
+    "Отскок от EMA": "Bounce from EMA",
+    
+    # Сила сигнала
+    "Очень сильный": "Very strong",
+    "Сильный": "Strong", 
+    "Средний": "Medium",
+    "Слабый": "Weak",
+    "Падение": "Decline",
+    "Рост": "Growth",
+    "Нет четкого сигнала": "No clear signal",
+    "Слабая уверенность": "Low confidence",
+    
+    # Технические термины
+    "Волатильность": "Volatility",
+    "Объем": "Volume",
+    "Свечи": "Candles",
+    "График": "Chart",
+    "Индикатор": "Indicator",
+    "Поддержка": "Support",
+    "Сопротивление": "Resistance",
+    
+    # Статусы и сообщения
+    "МОНЕТА НЕ НАЙДЕНА": "COIN NOT FOUND",
+    "Ошибка анализа": "Analysis error",
+    "Ошибка получения данных": "Data retrieval error",
+    "Система готова": "System ready",
+    "Анализирую": "Analyzing",
+    "Обучаю модели": "Training models",
+    "Готово к использованию": "Ready to use",
+    
+    # Меню и кнопки
+    "Статус системы": "System Status",
+    "Выбор монет": "Coin Selection",
+    "Последние сигналы": "Latest Signals",
+    "Анализ монеты": "Coin Analysis",
+    "Поиск монет": "Search Coins",
+    "Стреляющие монеты": "Shooting Stars",
+    "EMA Анализ": "EMA Analysis",
+    "Обучение ML": "ML Training",
+    "Назад": "Back",
+    "Контакты": "Contacts",
+    
+    # Контактная информация
+    "Разработчик": "Developer",
+    "Бот": "Bot",
+    "Связь": "Contact",
+    "Вопросы": "Questions",
+    "Предложения": "Suggestions", 
+    "Сотрудничество": "Cooperation",
+    "Возможности бота": "Bot capabilities",
+    "Технологии": "Technologies",
+    "Точность": "Accuracy",
+    "Покрытие": "Coverage",
+    
+    # Объяснения возможностей
+    "Анализ любых монет Binance": "Analysis of any Binance coins",
+    "Адаптивное ML обучение": "Adaptive ML training",
+    "Автосигналы каждые 30 минут": "Auto signals every 30 minutes",
+    "Стреляющие звезды": "Shooting stars",
+    "EMA анализ с ML предсказаниями": "EMA analysis with ML predictions",
+    "Machine Learning": "Machine Learning",
+    "Binance API": "Binance API",
+    "Telegram Bot API": "Telegram Bot API",
+    "Python": "Python",
+    "pandas": "pandas",
+    "scikit-learn": "scikit-learn",
+    "Модели обучены на реальных данных": "Models trained on real data",
+    "Все 614+ USDT пар Binance": "All 614+ Binance USDT pairs",
+    "Спасибо за использование": "Thank you for using",
+    
+    # Поиск и выбор
+    "Найдено": "Found",
+    "пар с": "pairs with",
+    "Выберите монету": "Select coin",
+    "Доступно": "Available",
+    "монет": "coins",
+    "Популярные монеты": "Popular coins",
+    "Поиск завершен": "Search completed",
+    "Стреляющих не найдено": "No shooting stars found",
+    "Попробуйте позже": "Try again later",
+    
+    # Объяснения анализа
+    "Проанализировано": "Analyzed",
+    "Найдено стреляющих": "Shooting stars found",
+    "ТОП стреляющих монет": "TOP shooting coins",
+    "Время анализа": "Analysis time",
+    "Нет монет с высокой вероятностью": "No coins with high probability",
+    "Используйте обычный анализ": "Use regular analysis"
+}
+
+def translate_text(text, language="ru"):
+    """Переводит текст на выбранный язык"""
+    if language == "ru":
+        return text
+    elif language == "uz":
+        # Простой перевод на узбекский только основных терминов
+        basic_translations = {
+            "Сигнал": "Сигнал",
+            "LONG": "LONG", 
+            "SHORT": "SHORT",
+            "ОЖИДАНИЕ": "КУТИШ",
+            "Цена входа": "Кириш нархи",
+            "Take Profit": "Фойда олиш",
+            "Stop Loss": "Йўқотишни тўхтатиш",
+            "RSI": "RSI",
+            "ML статус": "ML холати",
+            "Анализ": "Таҳлил",
+            "Назад": "Орқага",
+            "Статус системы": "Тизим холати",
+            "Выбор монет": "Тангаларни танлаш",
+            "Последние сигналы": "Охирги сигналлар",
+            "Анализ монеты": "Танга таҳлили",
+            "Поиск монет": "Тангаларни қидириш"
+        }
+        
+        translated_text = text
+        for russian, uzbek in basic_translations.items():
+            translated_text = translated_text.replace(russian, uzbek)
+        
+        return translated_text
+    elif language == "en":
+        # Перевод на английский
+        translated_text = text
+        for russian, english in ENGLISH_TRANSLATIONS.items():
+            translated_text = translated_text.replace(russian, english)
+        return translated_text
+    
+    return text
+
+def add_custom_uzbek_explanation(key, explanation):
+    """Добавляет пользовательское объяснение на узбекском языке"""
+    bot_state.custom_uzbek_explanations[key] = explanation
+    logger.info(f"✅ Добавлено узбекское объяснение для '{key}'")
+
+def get_custom_uzbek_explanation(key):
+    """Получает пользовательское объяснение на узбекском языке"""
+    return bot_state.custom_uzbek_explanations.get(key, "")
+
 def create_advanced_trading_chart(symbol, df, signal_data):
     """Создание продвинутого графика в стиле TradingView"""
     try:
+        # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Логируем информацию о DataFrame
+        logger.info(f"🔍 Создание графика для {symbol}")
+        logger.info(f"   Размер DataFrame: {df.shape}")
+        logger.info(f"   Колонки: {list(df.columns)}")
+        logger.info(f"   EMA колонки присутствуют: {'ema_20' in df.columns}")
+        
+        # Проверяем наличие EMA колонок
+        if 'ema_20' not in df.columns:
+            logger.error(f"❌ Отсутствует колонка ema_20 в DataFrame для {symbol}")
+            logger.error(f"   Доступные колонки: {list(df.columns)}")
+            
+            # Попробуем создать EMA колонки на месте
+            logger.info(f"🔧 Создаю EMA колонки на месте для {symbol}")
+            df['ema_20'] = df['close'].ewm(span=20).mean()
+            df['ema_50'] = df['close'].ewm(span=50).mean()
+            df['ema_100'] = df['close'].ewm(span=100).mean()
+            logger.info(f"✅ EMA колонки созданы: {list(df.columns)}")
         # Настройка стиля TradingView
         plt.style.use('dark_background')
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), 
@@ -754,6 +1107,19 @@ def create_advanced_trading_chart(symbol, df, signal_data):
         
         # Последние 100 свечей для лучшей видимости
         recent_df = df.tail(100)
+        
+        # Проверяем наличие EMA колонок в recent_df
+        if 'ema_20' not in recent_df.columns:
+            logger.error(f"❌ Отсутствует колонка ema_20 в recent_df для {symbol}")
+            logger.error(f"   Доступные колонки в recent_df: {list(recent_df.columns)}")
+            
+            # Попробуем создать EMA колонки в recent_df
+            logger.info(f"🔧 Создаю EMA колонки в recent_df для {symbol}")
+            recent_df['ema_20'] = recent_df['close'].ewm(span=20).mean()
+            recent_df['ema_50'] = recent_df['close'].ewm(span=50).mean()
+            recent_df['ema_100'] = recent_df['close'].ewm(span=100).mean()
+            logger.info(f"✅ EMA колонки созданы в recent_df: {list(recent_df.columns)}")
+            
         x_pos = range(len(recent_df))
         
         # Свечи
@@ -775,7 +1141,7 @@ def create_advanced_trading_chart(symbol, df, signal_data):
         current_price = signal_data['entry_price']
         current_idx = len(recent_df) - 1
         
-        if signal_data['signal_type'] == "🟢 LONG":
+        if "LONG" in signal_data['signal_type']:
             # Точка входа
             ax1.scatter(current_idx, current_price, color='#4caf50', s=100, marker='^', 
                        label='Вход LONG', zorder=5)
@@ -813,7 +1179,7 @@ def create_advanced_trading_chart(symbol, df, signal_data):
 💰 Текущая цена: ${current_price:.8f}
 📈 RSI: {signal_data['rsi']:.1f}"""
         
-        if signal_data['signal_type'] == "🟢 LONG":
+        if "LONG" in signal_data['signal_type']:
             info_text += f"""
 🎯 Take Profit: ${signal_data['take_profit']:.8f}
 🛡️ Stop Loss: ${signal_data['stop_loss']:.8f}"""
@@ -875,9 +1241,36 @@ async def get_available_pairs():
         ]
         return bot_state.available_pairs
 
+async def clear_chat_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Очистка истории чата"""
+    try:
+        chat_id = update.effective_chat.id
+        # Удаляем последние 10 сообщений бота
+        for i in range(10):
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id - i)
+            except:
+                pass
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось очистить историю чата: {e}")
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start с красивым меню"""
     # Используем состояние бота
+    
+    # Очищаем старые сообщения при каждом старте
+    await clear_chat_history(update, context)
+    
+    # Определяем текст кнопки языка (циклическое переключение)
+    if bot_state.language == "ru":
+        lang_button_text = "🇺🇿 O'zbekcha"
+        lang_callback = "switch_to_uzbek"
+    elif bot_state.language == "uz":
+        lang_button_text = "🇬🇧 English"
+        lang_callback = "switch_to_english"
+    else:  # en
+        lang_button_text = "🇷🇺 Русский"
+        lang_callback = "switch_to_russian"
     
     keyboard = [
         [InlineKeyboardButton("📊 Статус системы", callback_data="menu_status")],
@@ -888,6 +1281,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚀 Стреляющие монеты", callback_data="menu_shooting_stars")],
         [InlineKeyboardButton("📈 EMA Анализ", callback_data="menu_ema_analysis")],
         [InlineKeyboardButton("🧠 Обучение ML", callback_data="menu_train_ml")],
+        [InlineKeyboardButton("🗑️ Очистить чат", callback_data="clear_chat")],
+        [InlineKeyboardButton(lang_button_text, callback_data=lang_callback)],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -898,6 +1293,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Выберите действие из меню ниже:**
     """
+    
+    # Переводим сообщение на выбранный язык
+    welcome_message = translate_text(welcome_message, bot_state.language)
     
     await update.message.reply_text(welcome_message, reply_markup=reply_markup)
 
@@ -947,6 +1345,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await back_to_main_menu(query, context)
         elif query.data == "menu_contacts":
             await handle_contacts_menu(query, context)
+        elif query.data == "switch_to_uzbek":
+            await handle_switch_to_uzbek(query, context)
+        elif query.data == "switch_to_english":
+            await handle_switch_to_english(query, context)
+        elif query.data == "switch_to_russian":
+            await handle_switch_to_russian(query, context)
+        elif query.data == "clear_chat":
+            await handle_clear_chat(query, context)
             
     except Exception as e:
         print(f"❌ Ошибка в button_callback: {e}")
@@ -1039,13 +1445,32 @@ async def handle_signals_menu_new(query, context):
 🤖 **ML статус:** {signal_data['ml_status']}
             """
             
-            if signal_data['signal_type'] == "🟢 LONG":
+            if "LONG" in signal_data['signal_type']:
                 message += f"""
 🎯 **Take Profit:** ${signal_data['take_profit']:.8f}
 🛡️ **Stop Loss:** ${signal_data['stop_loss']:.8f}
                 """
+            elif "ОЖИДАНИЕ" in signal_data['signal_type']:
+                message += f"""
+
+💡 **Что означает ОЖИДАНИЕ:**
+• ❌ **НЕ входить** в позицию сейчас
+• ⏳ **Ждать** лучшего момента для входа
+• 📊 **Мониторить** цену и технические показатели
+• 🎯 **Дождаться** более благоприятных условий
+                """
             
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+            # Переводим сообщение на выбранный язык
+            message = translate_text(message, bot_state.language)
+            
+            # Переводим кнопки
+            if bot_state.language == "uz":
+                back_button_text = "🔙 Орқага"
+            elif bot_state.language == "en":
+                back_button_text = "🔙 Back"
+            else:
+                back_button_text = "🔙 Назад"
+            keyboard = [[InlineKeyboardButton(back_button_text, callback_data="back_to_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.message.reply_photo(
@@ -1065,7 +1490,17 @@ async def handle_signals_menu_new(query, context):
 🤖 **ML статус:** {signal_data['ml_status']}
             """
             
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+            # Переводим сообщение на выбранный язык
+            message = translate_text(message, bot_state.language)
+            
+            # Переводим кнопки
+            if bot_state.language == "uz":
+                back_button_text = "🔙 Орқага"
+            elif bot_state.language == "en":
+                back_button_text = "🔙 Back"
+            else:
+                back_button_text = "🔙 Назад"
+            keyboard = [[InlineKeyboardButton(back_button_text, callback_data="back_to_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.message.reply_text(message, reply_markup=reply_markup)
@@ -1412,8 +1847,17 @@ async def handle_ema_coin_analysis(query, context, symbol):
         message += f"\n📊 RSI: {signal_data['rsi']:.1f}"
         message += f"\n🤖 ML статус: {signal_data['ml_status']}"
         
-        # Кнопка назад
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu_ema_analysis")]]
+        # Переводим сообщение на выбранный язык
+        message = translate_text(message, bot_state.language)
+        
+        # Переводим кнопки
+        if bot_state.language == "uz":
+            back_button_text = "🔙 Орқага"
+        elif bot_state.language == "en":
+            back_button_text = "🔙 Back"
+        else:
+            back_button_text = "🔙 Назад"
+        keyboard = [[InlineKeyboardButton(back_button_text, callback_data="menu_ema_analysis")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(message, reply_markup=reply_markup)
@@ -1474,6 +1918,17 @@ async def back_to_main_menu(query, context):
     """Возврат в главное меню"""
     # Используем состояние бота
     
+    # Определяем текст кнопки языка (циклическое переключение)
+    if bot_state.language == "ru":
+        lang_button_text = "🇺🇿 O'zbekcha"
+        lang_callback = "switch_to_uzbek"
+    elif bot_state.language == "uz":
+        lang_button_text = "🇬🇧 English"
+        lang_callback = "switch_to_english"
+    else:  # en
+        lang_button_text = "🇷🇺 Русский"
+        lang_callback = "switch_to_russian"
+    
     keyboard = [
         [InlineKeyboardButton("📊 Статус системы", callback_data="menu_status")],
         [InlineKeyboardButton("🪙 Выбор монет", callback_data="menu_coins")],
@@ -1481,6 +1936,7 @@ async def back_to_main_menu(query, context):
         [InlineKeyboardButton("🔍 Анализ монеты", callback_data="menu_analyze")],
         [InlineKeyboardButton("🔍 Поиск монет", callback_data="menu_search")],
         [InlineKeyboardButton("📞 Контакты", callback_data="menu_contacts")],
+        [InlineKeyboardButton(lang_button_text, callback_data=lang_callback)],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -1491,6 +1947,9 @@ async def back_to_main_menu(query, context):
 
 **Выберите действие из меню ниже:**
     """
+    
+    # Переводим сообщение на выбранный язык
+    welcome_message = translate_text(welcome_message, bot_state.language)
     
     try:
         # Пытаемся редактировать сообщение
@@ -1543,6 +2002,119 @@ async def handle_contacts_menu(query, context):
     except Exception as e:
         logger.error(f"❌ Ошибка в handle_contacts_menu: {e}")
         await query.edit_message_text("❌ Ошибка отображения контактов")
+
+async def handle_switch_to_uzbek(query, context):
+    """Переключение на узбекский язык"""
+    try:
+        await query.answer()
+        bot_state.language = "uz"
+        
+        message = "🇺🇿 **Тил ўзгартирилди!**\n\nҲозир бот ўзбек тилида ишлайди.\n\n**Til:** O'zbekcha ✅"
+        keyboard = [[InlineKeyboardButton("🔙 Орқага", callback_data="back_to_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка переключения на узбекский: {e}")
+        await query.edit_message_text("❌ Ошибка переключения языка")
+
+async def handle_switch_to_english(query, context):
+    """Переключение на английский язык"""
+    try:
+        await query.answer()
+        bot_state.language = "en"
+        
+        message = "🇬🇧 **Language changed!**\n\nNow bot works in English language.\n\n**Language:** English ✅"
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_to_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка переключения на английский: {e}")
+        await query.edit_message_text("❌ Ошибка переключения языка")
+
+async def handle_switch_to_russian(query, context):
+    """Переключение на русский язык"""
+    try:
+        await query.answer()
+        bot_state.language = "ru"
+        
+        message = "🇷🇺 **Язык изменен!**\n\nТеперь бот работает на русском языке.\n\n**Язык:** Русский ✅"
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка переключения на русский: {e}")
+        await query.edit_message_text("❌ Ошибка переключения языка")
+
+async def handle_clear_chat(query, context):
+    """Очистка чата"""
+    try:
+        await query.answer("🗑️ Очищаю чат...")
+        
+        # Удаляем все сообщения бота в чате
+        chat_id = query.message.chat_id
+        
+        # Пытаемся удалить последние 20 сообщений
+        deleted_count = 0
+        for i in range(1, 21):
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=query.message.message_id - i)
+                deleted_count += 1
+            except:
+                pass
+        
+        # Отправляем новое сообщение с подтверждением
+        message = f"✅ **Чат очищен!**\n\n🗑️ Удалено сообщений: {deleted_count}\n\nТеперь чат чистый и показывает только актуальную информацию!"
+        
+        # Переводим сообщение на выбранный язык
+        if bot_state.language == "uz":
+            message = f"✅ **Чат тозалади!**\n\n🗑️ Ўчирилган хабарлар: {deleted_count}\n\nЭнди чат тоза ва фақат актуал маълумотларни кўрсатади!"
+        elif bot_state.language == "en":
+            message = f"✅ **Chat cleared!**\n\n🗑️ Messages deleted: {deleted_count}\n\nNow chat is clean and shows only actual information!"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка очистки чата: {e}")
+        await query.edit_message_text("❌ Ошибка очистки чата")
+
+async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /clear для очистки чата"""
+    try:
+        # Удаляем все сообщения бота в чате
+        chat_id = update.effective_chat.id
+        
+        # Пытаемся удалить последние 20 сообщений
+        deleted_count = 0
+        for i in range(1, 21):
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id - i)
+                deleted_count += 1
+            except:
+                pass
+        
+        # Отправляем подтверждение
+        message = f"✅ **Чат очищен!**\n\n🗑️ Удалено сообщений: {deleted_count}\n\nТеперь показываю только свежие данные!"
+        
+        # Переводим сообщение на выбранный язык
+        if bot_state.language == "uz":
+            message = f"✅ **Чат тозалади!**\n\n🗑️ Ўчирилган хабарлар: {deleted_count}\n\nЭнди фақат янги маълумотларни кўрсатаман!"
+        elif bot_state.language == "en":
+            message = f"✅ **Chat cleared!**\n\n🗑️ Messages deleted: {deleted_count}\n\nNow showing only fresh data!"
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка команды /clear: {e}")
+        await update.message.reply_text("❌ Ошибка очистки чата")
 
 async def set_coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /set_coin для выбора монеты"""
@@ -1620,11 +2192,23 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🤖 **ML статус:** {signal_data['ml_status']}
             """
             
-            if signal_data['signal_type'] == "🟢 LONG":
+            if "LONG" in signal_data['signal_type']:
                 message += f"""
 🎯 **Take Profit:** ${signal_data['take_profit']:.8f}
 🛡️ **Stop Loss:** ${signal_data['stop_loss']:.8f}
                 """
+            elif "ОЖИДАНИЕ" in signal_data['signal_type']:
+                message += f"""
+
+💡 **Что означает ОЖИДАНИЕ:**
+• ❌ **НЕ входить** в позицию сейчас
+• ⏳ **Ждать** лучшего момента для входа
+• 📊 **Мониторить** цену и технические показатели
+• 🎯 **Дождаться** более благоприятных условий
+                """
+            
+            # Переводим сообщение на выбранный язык
+            message = translate_text(message, bot_state.language)
             
             await update.message.reply_photo(
                 photo=chart_buffer,
@@ -1641,6 +2225,9 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📊 **RSI:** {signal_data['rsi']:.1f}
 🤖 **ML статус:** {signal_data['ml_status']}
             """
+            
+            # Переводим сообщение на выбранный язык
+            message = translate_text(message, bot_state.language)
             
             await update.message.reply_text(message)
             
@@ -1837,6 +2424,19 @@ def main():
         print("❌ Не удалось загрузить конфигурацию")
         return
     
+    # Проверяем локальный режим разработки
+    is_local_dev = bot_state.config.get('local_development', {}).get('enabled', False)
+    if is_local_dev:
+        print("🔧 ЛОКАЛЬНЫЙ РЕЖИМ РАЗРАБОТКИ")
+        print("🚫 Telegram API отключен - тестируем только функции анализа")
+        print("📊 Доступные функции:")
+        print("   - Анализ монет")
+        print("   - ML предсказания") 
+        print("   - EMA анализ")
+        print("   - Создание графиков")
+        print("\n💡 Для полного тестирования удалите bot_config_local.json")
+        return
+    
     # Инициализируем список доступных пар
     print("🔍 Получаю список популярных монет с Binance...")
     try:
@@ -1855,6 +2455,7 @@ def main():
     
     # Добавляем обработчики
     bot_state.application.add_handler(CommandHandler("start", start_command))
+    bot_state.application.add_handler(CommandHandler("clear", clear_chat_command))
     bot_state.application.add_handler(CommandHandler("set_coin", set_coin_command))
     bot_state.application.add_handler(CommandHandler("analyze", analyze_command))
     bot_state.application.add_handler(CommandHandler("signals", signals_command))

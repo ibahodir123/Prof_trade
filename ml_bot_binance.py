@@ -1029,6 +1029,15 @@ class SmartBacktestEngine:
         self.positions = {}
         self.current_balance = self.initial_balance
         
+        # Статистика по сигналам
+        signals_stats = {
+            'total_signals': 0,
+            'long_signals': 0,
+            'wait_signals': 0,
+            'trades_opened': 0,
+            'signals_below_threshold': 0
+        }
+        
         # Загружаем данные
         historical_data = {}
         for symbol in symbols:
@@ -1090,8 +1099,15 @@ class SmartBacktestEngine:
                 # Ищем новые сигналы
                 if symbol not in self.positions and len(self.positions) < self.max_positions:
                     signal_data = self.analyze_signal_for_backtest(symbol, df, current_idx)
+                    signals_stats['total_signals'] += 1
                     
-                    if signal_data['signal'] in ['LONG', 'SHORT'] and signal_data['confidence'] >= 50:
+                    if signal_data['signal'] == 'LONG':
+                        signals_stats['long_signals'] += 1
+                    else:
+                        signals_stats['wait_signals'] += 1
+                    
+                    # Снижен порог уверенности с 50% до 30%
+                    if signal_data['signal'] in ['LONG', 'SHORT'] and signal_data['confidence'] >= 30:
                         position_value = self.current_balance * self.position_size_percent
                         size = position_value / current_price
                         
@@ -1116,6 +1132,10 @@ class SmartBacktestEngine:
                             'stop_loss': stop_loss,
                             'timestamp': timestamp
                         }
+                        signals_stats['trades_opened'] += 1
+                        logger.info(f"🚀 Открыта позиция {signal_data['signal']} {symbol} по ${current_price:.4f} (уверенность: {signal_data['confidence']}%)")
+                    elif signal_data['signal'] in ['LONG', 'SHORT']:
+                        signals_stats['signals_below_threshold'] += 1
         
         # Закрываем оставшиеся позиции
         for symbol in list(self.positions.keys()):
@@ -1141,9 +1161,20 @@ class SmartBacktestEngine:
             
             del self.positions[symbol]
         
+        # Вывод статистики по сигналам
+        logger.info(f"📊 Статистика сигналов:")
+        logger.info(f"   Всего сигналов проанализировано: {signals_stats['total_signals']}")
+        logger.info(f"   LONG сигналов: {signals_stats['long_signals']}")
+        logger.info(f"   WAIT сигналов: {signals_stats['wait_signals']}")
+        logger.info(f"   Позиций открыто: {signals_stats['trades_opened']}")
+        logger.info(f"   Сигналов ниже порога (30%): {signals_stats['signals_below_threshold']}")
+        
         # Расчет статистики
         if not self.trades:
-            return {'error': 'Сделок не было'}
+            return {
+                'error': 'Сделок не было',
+                'signals_stats': signals_stats
+            }
         
         total_trades = len(self.trades)
         winning_trades = len([t for t in self.trades if t['pnl'] > 0])
@@ -1158,7 +1189,8 @@ class SmartBacktestEngine:
             'final_balance': self.current_balance,
             'total_return': total_return,
             'total_pnl': self.current_balance - self.initial_balance,
-            'trades': self.trades
+            'trades': self.trades,
+            'signals_stats': signals_stats
         }
 
 class BotState:
@@ -1882,7 +1914,7 @@ async def handle_backtest_menu(query, context):
 📅 **Период тестирования:** 01.01.2025 - сегодня
 💰 **Стартовый капитал:** $1,000 
 ⏱️ **Время выполнения:** 3-10 минут
-🧠 **Стратегия:** EMA + RSI анализ
+🧠 **Стратегия:** Smart ML предиктор
 
 **Что покажет тест:**
 ✅ Win Rate (% прибыльных сделок)
@@ -2010,7 +2042,27 @@ async def send_backtest_results(query, results, progress_msg):
     """Отправка результатов бэктестинга"""
     try:
         if 'error' in results:
-            await progress_msg.edit_text(f"❌ Ошибка бэктестинга: {results['error']}")
+            # Показываем статистику по сигналам даже если сделок не было
+            error_msg = f"❌ Ошибка бэктестинга: {results['error']}"
+            if 'signals_stats' in results:
+                stats = results['signals_stats']
+                error_msg += f"""\n\n📊 **Статистика сигналов:**
+• Всего проанализировано: {stats['total_signals']}
+• LONG сигналов: {stats['long_signals']}
+• WAIT сигналов: {stats['wait_signals']}
+• Позиций открыто: {stats['trades_opened']}
+• Сигналов ниже порога (30%): {stats['signals_below_threshold']}
+
+💡 **Возможные причины:**
+• Слишком высокий порог уверенности (30%)
+• ML модель предсказывает в основном малые движения
+• Недостаточно сильных сигналов в данном периоде"""
+            
+            # Кнопка возврата
+            keyboard = [[InlineKeyboardButton("🔙 Назад к бэктестингу", callback_data="menu_backtest")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await progress_msg.edit_text(error_msg, reply_markup=reply_markup)
             return
         
         # Формируем отчет
@@ -2070,7 +2122,7 @@ async def send_backtest_results(query, results, progress_msg):
 {top_text}
 📅 **Период:** 01.01.2025 - {datetime.now().strftime('%d.%m.%Y')}
 ⏱️ **Таймфрейм:** 1 час
-🧠 **Стратегия:** EMA + RSI анализ
+🧠 **Стратегия:** Smart ML предиктор
 
 ⚠️ **Отказ от ответственности:** Результаты прошлого не гарантируют будущую прибыль!"""
         
@@ -3127,7 +3179,7 @@ async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {top_text}
 📅 **Период:** 01.01.2025 - {datetime.now().strftime('%d.%m.%Y')}
 ⏱️ **Таймфрейм:** 1 час
-🧠 **Стратегия:** EMA + RSI анализ
+🧠 **Стратегия:** Smart ML предиктор
 
 ⚠️ **Отказ от ответственности:** Результаты прошлого не гарантируют будущую прибыль!"""
             

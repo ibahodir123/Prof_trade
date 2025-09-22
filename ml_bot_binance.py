@@ -2041,11 +2041,26 @@ async def analyze_coin_with_advanced_logic(query, context):
         
         # Добавляем Smart ML предсказание
         smart_prediction = None
+        logger.info(f"🔍 DEBUG: signal_data keys: {list(signal_data.keys())}")
+        logger.info(f"🔍 DEBUG: features есть: {signal_data.get('features') is not None}")
+        
+        # Если features нет, пытаемся подготовить их из DataFrame
+        if not signal_data.get('features') and signal_data.get('df') is not None:
+            try:
+                logger.info("🔧 Подготавливаю features для Smart ML...")
+                features = prepare_ml_features(signal_data['df'], bot_state.current_coin)
+                signal_data['features'] = features
+                logger.info("✅ Features подготовлены для Smart ML")
+            except Exception as e:
+                logger.error(f"❌ Ошибка подготовки features: {e}")
+        
         if signal_data.get('features'):
             smart_prediction = predict_with_smart_ml(signal_data['features'])
             if smart_prediction:
                 logger.info(f"🧠 Smart ML: {smart_prediction['prediction']}")
                 signal_data['smart_prediction'] = smart_prediction
+        else:
+            logger.warning("⚠️ Features не найдены для Smart ML")
         
         # Проверяем, является ли это ошибкой "монета не найдена"
         if signal_data.get('error'):

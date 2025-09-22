@@ -1273,14 +1273,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lang_callback = "switch_to_russian"
     
     keyboard = [
-        [InlineKeyboardButton("📊 Статус системы", callback_data="menu_status")],
-        [InlineKeyboardButton("🪙 Выбор монет", callback_data="menu_coins")],
-        [InlineKeyboardButton("📈 Последние сигналы", callback_data="menu_signals")],
-        [InlineKeyboardButton("🔍 Анализ монеты", callback_data="menu_analyze")],
-        [InlineKeyboardButton("🔍 Поиск монет", callback_data="menu_search")],
-        [InlineKeyboardButton("🚀 Стреляющие монеты", callback_data="menu_shooting_stars")],
-        [InlineKeyboardButton("📈 EMA Анализ", callback_data="menu_ema_analysis")],
-        [InlineKeyboardButton("🧠 Обучение ML", callback_data="menu_train_ml")],
+        [InlineKeyboardButton("⚡ ТОРГОВЫЕ ПАРЫ", callback_data="menu_coins")],
+        [InlineKeyboardButton("🎯 АНАЛИЗ & СИГНАЛЫ", callback_data="menu_analyze")],
+        [InlineKeyboardButton("🔍 ПОИСК АКТИВОВ", callback_data="menu_search")],
+        [InlineKeyboardButton("💬 СВЯЗАТЬСЯ С НАМИ", callback_data="menu_contacts")],
         [InlineKeyboardButton("🗑️ Очистить чат", callback_data="clear_chat")],
         [InlineKeyboardButton(lang_button_text, callback_data=lang_callback)],
     ]
@@ -1310,22 +1306,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"🔘 Нажата кнопка: {query.data}")
     
     try:
-        if query.data == "menu_status":
-            await handle_status_menu(query, context)
-        elif query.data == "menu_coins":
+        if query.data == "menu_coins":
             await handle_coins_menu(query, context)
-        elif query.data == "menu_signals":
-            await analyze_coin_with_advanced_logic(query, context)
         elif query.data == "menu_analyze":
             await handle_analyze_menu(query, context)
         elif query.data == "menu_search":
             await handle_search_menu(query, context)
-        elif query.data == "menu_shooting_stars":
-            await handle_shooting_stars_menu(query, context)
-        elif query.data == "menu_ema_analysis":
-            await handle_ema_analysis_menu(query, context)
-        elif query.data == "menu_train_ml":
-            await handle_train_ml_menu(query, context)
         elif query.data.startswith("select_"):
             await handle_coin_selection(query, context)
         elif query.data == "find_shooting_stars":
@@ -1939,12 +1925,10 @@ async def back_to_main_menu(query, context):
         lang_callback = "switch_to_russian"
     
     keyboard = [
-        [InlineKeyboardButton("📊 Статус системы", callback_data="menu_status")],
-        [InlineKeyboardButton("🪙 Выбор монет", callback_data="menu_coins")],
-        [InlineKeyboardButton("📈 Последние сигналы", callback_data="menu_signals")],
-        [InlineKeyboardButton("🔍 Анализ монеты", callback_data="menu_analyze")],
-        [InlineKeyboardButton("🔍 Поиск монет", callback_data="menu_search")],
-        [InlineKeyboardButton("📞 Контакты", callback_data="menu_contacts")],
+        [InlineKeyboardButton("⚡ ТОРГОВЫЕ ПАРЫ", callback_data="menu_coins")],
+        [InlineKeyboardButton("🎯 АНАЛИЗ & СИГНАЛЫ", callback_data="menu_analyze")],
+        [InlineKeyboardButton("🔍 ПОИСК АКТИВОВ", callback_data="menu_search")],
+        [InlineKeyboardButton("💬 СВЯЗАТЬСЯ С НАМИ", callback_data="menu_contacts")],
         [InlineKeyboardButton(lang_button_text, callback_data=lang_callback)],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)

@@ -901,7 +901,7 @@ class SmartBacktestEngine:
             try:
                 # Подготавливаем ML признаки
                 features = prepare_ml_features(historical_data, symbol)
-                if not features:
+                if features is None or (hasattr(features, 'empty') and features.empty):
                     return {'signal': 'WAIT', 'confidence': 0}
                 
                 # Получаем Smart ML предсказание

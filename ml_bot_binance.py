@@ -855,6 +855,8 @@ class SmartBacktestEngine:
         self.positions = {}
         self.position_size_percent = 0.1
         self.max_positions = 3
+        self.progress_file = "backtest_progress.json"
+        self.load_progress()
         
     def get_historical_data(self, symbol: str, timeframe='1h') -> pd.DataFrame:
         """Получение исторических данных с Binance"""
@@ -886,6 +888,78 @@ class SmartBacktestEngine:
         except:
             return pd.DataFrame()
     
+    def load_progress(self):
+        """Загрузка сохраненного прогресса бэктеста"""
+        try:
+            if os.path.exists(self.progress_file):
+                with open(self.progress_file, 'r', encoding='utf-8') as f:
+                    progress = json.load(f)
+                
+                self.trades = progress.get('trades', [])
+                self.current_balance = progress.get('current_balance', self.initial_balance)
+                last_date_str = progress.get('last_date')
+                
+                if last_date_str:
+                    self.start_date = datetime.fromisoformat(last_date_str)
+                    logger.info(f"📅 Загружен прогресс бэктеста с {self.start_date.date()}")
+                    logger.info(f"💰 Текущий баланс: ${self.current_balance:.2f}")
+                    logger.info(f"📊 Загружено сделок: {len(self.trades)}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки прогресса: {e}")
+    
+    def save_progress(self, last_processed_date: datetime):
+        """Сохранение прогресса бэктеста"""
+        try:
+            progress = {
+                'last_date': last_processed_date.isoformat(),
+                'current_balance': self.current_balance,
+                'trades': self.trades,
+                'total_trades': len(self.trades),
+                'total_return': ((self.current_balance - self.initial_balance) / self.initial_balance) * 100,
+                'saved_at': datetime.now().isoformat()
+            }
+            
+            with open(self.progress_file, 'w', encoding='utf-8') as f:
+                json.dump(progress, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"💾 Прогресс сохранен: {last_processed_date.date()}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения прогресса: {e}")
+    
+    def clear_progress(self):
+        """Очистка сохраненного прогресса"""
+        try:
+            if os.path.exists(self.progress_file):
+                os.remove(self.progress_file)
+            
+            self.start_date = datetime(2025, 1, 1)
+            self.current_balance = self.initial_balance
+            self.trades = []
+            
+            logger.info("🗑️ Прогресс бэктеста очищен")
+        except Exception as e:
+            logger.error(f"❌ Ошибка очистки прогресса: {e}")
+    
+    def get_progress_info(self) -> Dict[str, Any]:
+        """Получение информации о прогрессе"""
+        try:
+            if os.path.exists(self.progress_file):
+                with open(self.progress_file, 'r', encoding='utf-8') as f:
+                    progress = json.load(f)
+                
+                return {
+                    'has_progress': True,
+                    'last_date': progress.get('last_date'),
+                    'total_trades': progress.get('total_trades', 0),
+                    'total_return': progress.get('total_return', 0),
+                    'current_balance': progress.get('current_balance', self.initial_balance),
+                    'saved_at': progress.get('saved_at')
+                }
+            else:
+                return {'has_progress': False}
+        except:
+            return {'has_progress': False}
+    
     def analyze_signal_for_backtest(self, symbol: str, df: pd.DataFrame, current_idx: int) -> Dict[str, Any]:
         """Smart ML анализ сигнала для бэктеста"""
         try:
@@ -907,10 +981,15 @@ class SmartBacktestEngine:
                 # Получаем Smart ML предсказание
                 smart_prediction = predict_with_smart_ml(features)
                 if not smart_prediction:
+                    logger.warning("⚠️ Smart ML вернул None в бэктесте")
                     return {'signal': 'WAIT', 'confidence': 0}
                 
                 probabilities = smart_prediction['probabilities']
                 prediction = smart_prediction['prediction']
+                
+                # Логируем вероятности
+                logger.info(f"🧠 ML прогноз в бэктесте: {prediction}")
+                logger.info(f"📊 Вероятности: M:{probabilities['medium']:.2f} L:{probabilities['large']:.2f} S:{probabilities['small']:.2f}")
                 
                 # Генерируем сигнал на основе ML
                 signal = 'WAIT'
@@ -920,9 +999,13 @@ class SmartBacktestEngine:
                 medium_prob = probabilities['medium']
                 large_prob = probabilities['large']
                 
-                if medium_prob > 0.35 or large_prob > 0.15:
+                # Ослабленные пороги для бэктеста
+                if medium_prob > 0.20 or large_prob > 0.10:
                     signal = 'LONG'
                     confidence = int((medium_prob + large_prob) * 100)
+                    logger.info(f"✅ LONG сигнал! M:{medium_prob:.2f} L:{large_prob:.2f} Conf:{confidence}")
+                else:
+                    logger.info(f"⏳ WAIT сигнал M:{medium_prob:.2f} L:{large_prob:.2f} (пороги: M>0.20, L>0.10)")
                 
                 return {
                     'signal': signal,

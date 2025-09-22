@@ -1737,7 +1737,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⚡ ТОРГОВЫЕ ПАРЫ", callback_data="menu_coins")],
         [InlineKeyboardButton("🎯 АНАЛИЗ & СИГНАЛЫ", callback_data="menu_analyze")],
         [InlineKeyboardButton("🔍 ПОИСК АКТИВОВ", callback_data="menu_search")],
-        [InlineKeyboardButton("📊 БЭКТЕСТИНГ", callback_data="menu_backtest")],
         [InlineKeyboardButton("💬 СВЯЗАТЬСЯ С НАМИ", callback_data="menu_contacts")],
         [InlineKeyboardButton("🗑️ Очистить чат", callback_data="clear_chat")],
         [InlineKeyboardButton(lang_button_text, callback_data=lang_callback)],
@@ -1774,8 +1773,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_analyze_menu(query, context)
         elif query.data == "menu_search":
             await handle_search_menu(query, context)
-        elif query.data == "menu_backtest":
-            await handle_backtest_menu(query, context)
         elif query.data.startswith("select_"):
             await handle_coin_selection(query, context)
         elif query.data == "find_shooting_stars":
@@ -2668,7 +2665,6 @@ async def back_to_main_menu(query, context):
         [InlineKeyboardButton("⚡ ТОРГОВЫЕ ПАРЫ", callback_data="menu_coins")],
         [InlineKeyboardButton("🎯 АНАЛИЗ & СИГНАЛЫ", callback_data="menu_analyze")],
         [InlineKeyboardButton("🔍 ПОИСК АКТИВОВ", callback_data="menu_search")],
-        [InlineKeyboardButton("📊 БЭКТЕСТИНГ", callback_data="menu_backtest")],
         [InlineKeyboardButton("💬 СВЯЗАТЬСЯ С НАМИ", callback_data="menu_contacts")],
         [InlineKeyboardButton(lang_button_text, callback_data=lang_callback)],
     ]
@@ -3325,7 +3321,6 @@ def main():
     bot_state.application.add_handler(CommandHandler("signals", signals_command))
     bot_state.application.add_handler(CommandHandler("search", search_command))
     bot_state.application.add_handler(CommandHandler("test_binance", test_binance_command))
-    bot_state.application.add_handler(CommandHandler("backtest", backtest_command))
     bot_state.application.add_handler(CallbackQueryHandler(button_callback))
     
     print("✅ Бот настроен успешно")

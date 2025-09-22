@@ -13,7 +13,9 @@ import ccxt
 import pandas as pd
 import numpy as np
 import joblib
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
+from typing import Dict, List, Any
 # TensorFlow импорты удалены (не используются)
 from advanced_ema_analyzer import AdvancedEMAAnalyzer
 from advanced_ml_trainer import AdvancedMLTrainer
@@ -752,6 +754,235 @@ def analyze_coin_signal(symbol):
         return None
 
 # Класс для управления состоянием бота
+class BacktestEngine:
+    def __init__(self):
+        self.start_date = datetime(2025, 1, 1)
+        self.end_date = datetime.now()
+        self.initial_balance = 1000.0
+        self.current_balance = self.initial_balance
+        self.trades = []
+        self.positions = {}
+        self.position_size_percent = 0.1
+        self.max_positions = 3
+        
+    def get_historical_data(self, symbol: str, timeframe='1h') -> pd.DataFrame:
+        """Получение исторических данных с Binance"""
+        try:
+            exchange = ccxt.binance()
+            since = int(self.start_date.timestamp() * 1000)
+            
+            all_ohlcv = []
+            current_since = since
+            
+            while current_since < int(self.end_date.timestamp() * 1000):
+                try:
+                    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=current_since, limit=1000)
+                    if not ohlcv:
+                        break
+                    all_ohlcv.extend(ohlcv)
+                    current_since = ohlcv[-1][0] + 1
+                    time.sleep(0.1)  # Пауза для API
+                except:
+                    break
+            
+            if not all_ohlcv:
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df = df.set_index('timestamp')
+            return df
+        except:
+            return pd.DataFrame()
+    
+    def analyze_signal_for_backtest(self, symbol: str, df: pd.DataFrame, current_idx: int) -> Dict[str, Any]:
+        """Анализ сигнала для бэктеста"""
+        try:
+            historical_data = df.iloc[:current_idx + 1].copy()
+            if len(historical_data) < 100:
+                return {'signal': 'WAIT', 'confidence': 0}
+            
+            # Простой EMA анализ для бэктеста
+            historical_data['ema_20'] = historical_data['close'].ewm(span=20).mean()
+            historical_data['ema_50'] = historical_data['close'].ewm(span=50).mean()
+            historical_data['ema_100'] = historical_data['close'].ewm(span=100).mean()
+            
+            # RSI
+            delta = historical_data['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            
+            last_close = historical_data.iloc[-1]['close']
+            last_ema20 = historical_data.iloc[-1]['ema_20']
+            last_ema50 = historical_data.iloc[-1]['ema_50']
+            last_ema100 = historical_data.iloc[-1]['ema_100']
+            last_rsi = rsi.iloc[-1]
+            
+            # Определение сигнала
+            signal = 'WAIT'
+            confidence = 0
+            
+            # LONG сигнал
+            if (last_close > last_ema20 > last_ema50 > last_ema100 and 
+                last_rsi > 30 and last_rsi < 70):
+                signal = 'LONG'
+                confidence = 60 + min(30, (last_close - last_ema20) / last_ema20 * 1000)
+            
+            # SHORT сигнал  
+            elif (last_close < last_ema20 < last_ema50 < last_ema100 and 
+                  last_rsi > 30 and last_rsi < 70):
+                signal = 'SHORT'
+                confidence = 60 + min(30, (last_ema20 - last_close) / last_ema20 * 1000)
+            
+            return {
+                'signal': signal,
+                'confidence': max(0, min(100, confidence)),
+                'price': float(last_close),
+                'rsi': last_rsi
+            }
+        except:
+            return {'signal': 'WAIT', 'confidence': 0}
+    
+    def run_backtest(self, symbols: List[str]) -> Dict[str, Any]:
+        """Запуск бэктеста"""
+        self.trades = []
+        self.positions = {}
+        self.current_balance = self.initial_balance
+        
+        # Загружаем данные
+        historical_data = {}
+        for symbol in symbols:
+            df = self.get_historical_data(symbol)
+            if not df.empty:
+                historical_data[symbol] = df
+        
+        if not historical_data:
+            return {'error': 'Нет данных для тестирования'}
+        
+        # Находим общие временные точки
+        all_timestamps = set()
+        for df in historical_data.values():
+            all_timestamps.update(df.index)
+        timestamps = sorted(list(all_timestamps))
+        
+        # Основной цикл бэктеста
+        for i, timestamp in enumerate(timestamps):
+            for symbol, df in historical_data.items():
+                if timestamp not in df.index:
+                    continue
+                
+                current_price = float(df.loc[timestamp, 'close'])
+                current_idx = df.index.get_loc(timestamp)
+                
+                # Проверяем закрытие позиций
+                if symbol in self.positions:
+                    position = self.positions[symbol]
+                    should_close = False
+                    
+                    if position['side'] == 'LONG':
+                        if current_price >= position['take_profit'] or current_price <= position['stop_loss']:
+                            should_close = True
+                    else:
+                        if current_price <= position['take_profit'] or current_price >= position['stop_loss']:
+                            should_close = True
+                    
+                    if should_close:
+                        # Расчет PnL
+                        if position['side'] == 'LONG':
+                            pnl = (current_price - position['entry_price']) * position['size']
+                        else:
+                            pnl = (position['entry_price'] - current_price) * position['size']
+                        
+                        self.current_balance += pnl
+                        
+                        self.trades.append({
+                            'symbol': symbol,
+                            'side': position['side'],
+                            'entry_price': position['entry_price'],
+                            'exit_price': current_price,
+                            'pnl': pnl,
+                            'pnl_percent': (pnl / (position['entry_price'] * position['size'])) * 100,
+                            'timestamp': timestamp
+                        })
+                        
+                        del self.positions[symbol]
+                
+                # Ищем новые сигналы
+                if symbol not in self.positions and len(self.positions) < self.max_positions:
+                    signal_data = self.analyze_signal_for_backtest(symbol, df, current_idx)
+                    
+                    if signal_data['signal'] in ['LONG', 'SHORT'] and signal_data['confidence'] >= 50:
+                        position_value = self.current_balance * self.position_size_percent
+                        size = position_value / current_price
+                        
+                        # Уровни TP/SL
+                        if signal_data['confidence'] >= 70:
+                            profit_pct, loss_pct = 0.04, 0.02
+                        else:
+                            profit_pct, loss_pct = 0.03, 0.015
+                        
+                        if signal_data['signal'] == 'LONG':
+                            take_profit = current_price * (1 + profit_pct)
+                            stop_loss = current_price * (1 - loss_pct)
+                        else:
+                            take_profit = current_price * (1 - profit_pct)
+                            stop_loss = current_price * (1 + loss_pct)
+                        
+                        self.positions[symbol] = {
+                            'side': signal_data['signal'],
+                            'entry_price': current_price,
+                            'size': size,
+                            'take_profit': take_profit,
+                            'stop_loss': stop_loss,
+                            'timestamp': timestamp
+                        }
+        
+        # Закрываем оставшиеся позиции
+        for symbol in list(self.positions.keys()):
+            last_price = float(historical_data[symbol].iloc[-1]['close'])
+            position = self.positions[symbol]
+            
+            if position['side'] == 'LONG':
+                pnl = (last_price - position['entry_price']) * position['size']
+            else:
+                pnl = (position['entry_price'] - last_price) * position['size']
+            
+            self.current_balance += pnl
+            
+            self.trades.append({
+                'symbol': symbol,
+                'side': position['side'],
+                'entry_price': position['entry_price'],
+                'exit_price': last_price,
+                'pnl': pnl,
+                'pnl_percent': (pnl / (position['entry_price'] * position['size'])) * 100,
+                'timestamp': timestamps[-1]
+            })
+            
+            del self.positions[symbol]
+        
+        # Расчет статистики
+        if not self.trades:
+            return {'error': 'Сделок не было'}
+        
+        total_trades = len(self.trades)
+        winning_trades = len([t for t in self.trades if t['pnl'] > 0])
+        win_rate = (winning_trades / total_trades) * 100
+        total_return = ((self.current_balance - self.initial_balance) / self.initial_balance) * 100
+        
+        return {
+            'total_trades': total_trades,
+            'winning_trades': winning_trades,
+            'win_rate': win_rate,
+            'initial_balance': self.initial_balance,
+            'final_balance': self.current_balance,
+            'total_return': total_return,
+            'total_pnl': self.current_balance - self.initial_balance,
+            'trades': self.trades
+        }
+
 class BotState:
     def __init__(self):
         self.current_coin = "BTC/USDT"
@@ -763,6 +994,7 @@ class BotState:
         self.shooting_predictor = None
         self.language = "ru"  # По умолчанию русский, "uz" для узбекского
         self.custom_uzbek_explanations = {}  # Пользовательские объяснения на узбекском
+        self.backtest_engine = BacktestEngine()  # Движок бэктестинга
     
     def initialize(self):
         """Инициализация состояния бота"""
@@ -1276,6 +1508,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⚡ ТОРГОВЫЕ ПАРЫ", callback_data="menu_coins")],
         [InlineKeyboardButton("🎯 АНАЛИЗ & СИГНАЛЫ", callback_data="menu_analyze")],
         [InlineKeyboardButton("🔍 ПОИСК АКТИВОВ", callback_data="menu_search")],
+        [InlineKeyboardButton("📊 БЭКТЕСТИНГ", callback_data="menu_backtest")],
         [InlineKeyboardButton("💬 СВЯЗАТЬСЯ С НАМИ", callback_data="menu_contacts")],
         [InlineKeyboardButton("🗑️ Очистить чат", callback_data="clear_chat")],
         [InlineKeyboardButton(lang_button_text, callback_data=lang_callback)],
@@ -1312,6 +1545,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_analyze_menu(query, context)
         elif query.data == "menu_search":
             await handle_search_menu(query, context)
+        elif query.data == "menu_backtest":
+            await handle_backtest_menu(query, context)
         elif query.data.startswith("select_"):
             await handle_coin_selection(query, context)
         elif query.data == "find_shooting_stars":
@@ -1327,6 +1562,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif query.data.startswith("ema_analyze_"):
             symbol = query.data.replace("ema_analyze_", "")
             await handle_ema_coin_analysis(query, context, symbol)
+        elif query.data == "backtest_quick":
+            await handle_backtest_quick(query, context)
+        elif query.data == "backtest_full":
+            await handle_backtest_full(query, context)
+        elif query.data == "backtest_custom":
+            await handle_backtest_custom(query, context)
         elif query.data == "back_to_main":
             await back_to_main_menu(query, context)
         elif query.data == "menu_contacts":
@@ -1427,6 +1668,224 @@ async def handle_search_menu(query, context):
         await query.edit_message_text(message, reply_markup=reply_markup)
     except Exception as e:
         await query.edit_message_text(f"❌ Ошибка поиска: {str(e)}")
+
+async def handle_backtest_menu(query, context):
+    """Обработка кнопки Бэктестинг"""
+    try:
+        message = """
+📊 **БЭКТЕСТИНГ ТОРГОВОГО БОТА**
+
+🎯 **Проверьте прибыльность стратегии на исторических данных!**
+
+**Команды для запуска:**
+• `/backtest BTC ETH` - тест на BTC и ETH
+• `/backtest ADA SOL XRP` - тест на 3 монетах
+• `/backtest ALL` - тест на топ-10 монетах
+
+📅 **Период тестирования:** 01.01.2025 - сегодня
+💰 **Стартовый капитал:** $1,000 
+⏱️ **Время выполнения:** 3-10 минут
+🧠 **Стратегия:** EMA + RSI анализ
+
+**Что покажет тест:**
+✅ Win Rate (% прибыльных сделок)
+📈 Общая доходность за период
+🏆 Топ прибыльные пары
+📊 Детальная статистика
+
+⚠️ **Важно:** Результаты прошлого не гарантируют будущую прибыль!
+        """
+        
+        # Кнопки для быстрого запуска
+        keyboard = [
+            [InlineKeyboardButton("⚡ Быстрый тест (BTC, ETH, ADA)", callback_data="backtest_quick")],
+            [InlineKeyboardButton("📊 Полный тест (ТОП-10)", callback_data="backtest_full")],
+            [InlineKeyboardButton("💰 ВЫБРАТЬ МОНЕТЫ", callback_data="backtest_custom")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup)
+    except Exception as e:
+        await query.edit_message_text(f"❌ Ошибка меню бэктестинга: {str(e)}")
+
+async def handle_backtest_quick(query, context):
+    """Быстрый бэктест на 3 основных монетах"""
+    try:
+        await query.answer()
+        
+        symbols = ['BTC/USDT', 'ETH/USDT', 'ADA/USDT']
+        symbols_text = 'BTC, ETH, ADA'
+        
+        progress_msg = await query.edit_message_text(
+            f"🚀 **ЗАПУСКАЮ БЫСТРЫЙ БЭКТЕСТ**\n\n"
+            f"🪙 **Монеты:** {symbols_text}\n"
+            f"📅 **Период:** 01.01.2025 - {datetime.now().strftime('%d.%m.%Y')}\n"
+            f"💰 **Стартовый капитал:** $1,000\n\n"
+            f"⏳ **Загружаю данные...** (2-3 минуты)"
+        )
+        
+        try:
+            results = bot_state.backtest_engine.run_backtest(symbols)
+            await send_backtest_results(query, results, progress_msg)
+        except Exception as e:
+            await progress_msg.edit_text(f"❌ Ошибка быстрого бэктеста: {str(e)}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка быстрого бэктеста: {e}")
+
+async def handle_backtest_full(query, context):
+    """Полный бэктест на топ-10 монетах"""
+    try:
+        await query.answer()
+        
+        symbols = ['BTC/USDT', 'ETH/USDT', 'ADA/USDT', 'SOL/USDT', 'XRP/USDT', 
+                  'BNB/USDT', 'DOGE/USDT', 'AVAX/USDT', 'DOT/USDT', 'LINK/USDT']
+        symbols_text = 'BTC, ETH, ADA, SOL, XRP, BNB, DOGE, AVAX, DOT, LINK'
+        
+        progress_msg = await query.edit_message_text(
+            f"🚀 **ЗАПУСКАЮ ПОЛНЫЙ БЭКТЕСТ**\n\n"
+            f"🪙 **Монеты:** ТОП-10\n"
+            f"📅 **Период:** 01.01.2025 - {datetime.now().strftime('%d.%m.%Y')}\n"
+            f"💰 **Стартовый капитал:** $1,000\n\n"
+            f"⏳ **Загружаю данные...** (5-10 минут)\n"
+            f"⚠️ **Пожалуйста, подождите...**"
+        )
+        
+        try:
+            results = bot_state.backtest_engine.run_backtest(symbols)
+            await send_backtest_results(query, results, progress_msg)
+        except Exception as e:
+            await progress_msg.edit_text(f"❌ Ошибка полного бэктеста: {str(e)}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка полного бэктеста: {e}")
+
+async def handle_backtest_custom(query, context):
+    """Инструкция по пользовательскому бэктестингу"""
+    try:
+        await query.answer()
+        
+        message = """
+💰 **ПОЛЬЗОВАТЕЛЬСКИЙ БЭКТЕСТ**
+
+🎯 **Для тестирования своих монет используйте команду:**
+`/backtest ВАШИ_МОНЕТЫ`
+
+📈 **Примеры команд:**
+• `/backtest MATIC ATOM` - тест на 2 монетах
+• `/backtest SOL AVAX DOT LINK` - тест на 4 монетах  
+• `/backtest SHIB PEPE DOGE` - тест мем-монет
+• `/backtest LTC BCH ETC` - альткоины
+• `/backtest SAND MANA GALA` - игровые токены
+
+⚡ **Быстрые варианты:**
+• `/backtest BTC ETH` - основные монеты
+• `/backtest ADA XRP ALGO` - популярные альткоины
+• `/backtest ALL` - ТОП-10 монет
+
+⚠️ **Ограничения:**
+• Максимум 10 монет за раз
+• Только пары с USDT (добавляется автоматически)
+• Тестирование с 01.01.2025
+
+🕐 **Время выполнения:** 3-10 минут в зависимости от количества монет
+
+📊 **Что получите:**
+✅ Win Rate для каждой монеты
+📈 Общую доходность портфеля  
+🏆 Лучшие и худшие пары
+💰 Прибыль/убыток в долларах
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("🔙 Назад к меню", callback_data="menu_backtest")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup)
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка инструкции бэктеста: {e}")
+        await query.edit_message_text(f"❌ Ошибка: {str(e)}")
+
+async def send_backtest_results(query, results, progress_msg):
+    """Отправка результатов бэктестинга"""
+    try:
+        if 'error' in results:
+            await progress_msg.edit_text(f"❌ Ошибка бэктестинга: {results['error']}")
+            return
+        
+        # Формируем отчет
+        win_rate = results['win_rate']
+        total_return = results['total_return']
+        total_trades = results['total_trades']
+        winning_trades = results['winning_trades']
+        losing_trades = total_trades - winning_trades
+        final_balance = results['final_balance']
+        total_pnl = results['total_pnl']
+        
+        # Определяем эмодзи результата
+        if total_return > 20:
+            result_emoji = "🚀💰"
+        elif total_return > 0:
+            result_emoji = "📈✅"
+        elif total_return > -10:
+            result_emoji = "📊⚠️"
+        else:
+            result_emoji = "📉❌"
+        
+        # Статистика по парам
+        symbol_stats = {}
+        for trade in results['trades']:
+            symbol = trade['symbol']
+            if symbol not in symbol_stats:
+                symbol_stats[symbol] = {'trades': 0, 'pnl': 0, 'wins': 0}
+            symbol_stats[symbol]['trades'] += 1
+            symbol_stats[symbol]['pnl'] += trade['pnl']
+            if trade['pnl'] > 0:
+                symbol_stats[symbol]['wins'] += 1
+        
+        # Топ-3 прибыльные пары
+        if symbol_stats:
+            top_pairs = sorted(symbol_stats.items(), key=lambda x: x[1]['pnl'], reverse=True)[:3]
+            top_text = ""
+            for symbol, stats in top_pairs:
+                wr = (stats['wins'] / stats['trades']) * 100 if stats['trades'] > 0 else 0
+                top_text += f"• {symbol.replace('/USDT', '')}: ${stats['pnl']:.0f} ({wr:.0f}% WR)\n"
+        else:
+            top_text = "Нет данных\n"
+        
+        report = f"""{result_emoji} **РЕЗУЛЬТАТЫ БЭКТЕСТИНГА**
+
+📊 **ОБЩАЯ СТАТИСТИКА:**
+💰 Стартовый капитал: $1,000
+💵 Финальный капитал: ${final_balance:.2f}
+📈 Общая доходность: {total_return:+.1f}%
+💸 Чистая прибыль: ${total_pnl:+.2f}
+
+🎯 **ТОРГОВАЯ СТАТИСТИКА:**
+📊 Всего сделок: {total_trades}
+✅ Прибыльных: {winning_trades} ({win_rate:.1f}%)
+❌ Убыточных: {losing_trades} ({100-win_rate:.1f}%)
+
+🏆 **ТОП-3 ПРИБЫЛЬНЫЕ ПАРЫ:**
+{top_text}
+📅 **Период:** 01.01.2025 - {datetime.now().strftime('%d.%m.%Y')}
+⏱️ **Таймфрейм:** 1 час
+🧠 **Стратегия:** EMA + RSI анализ
+
+⚠️ **Отказ от ответственности:** Результаты прошлого не гарантируют будущую прибыль!"""
+        
+        # Кнопка возврата
+        keyboard = [[InlineKeyboardButton("🔙 Назад к бэктестингу", callback_data="menu_backtest")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await progress_msg.edit_text(report, reply_markup=reply_markup)
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки результатов: {e}")
+        await progress_msg.edit_text(f"❌ Ошибка формирования отчета: {str(e)}")
 
 async def handle_shooting_stars_menu(query, context):
     """Обработка кнопки Стреляющие монеты"""
@@ -1928,6 +2387,7 @@ async def back_to_main_menu(query, context):
         [InlineKeyboardButton("⚡ ТОРГОВЫЕ ПАРЫ", callback_data="menu_coins")],
         [InlineKeyboardButton("🎯 АНАЛИЗ & СИГНАЛЫ", callback_data="menu_analyze")],
         [InlineKeyboardButton("🔍 ПОИСК АКТИВОВ", callback_data="menu_search")],
+        [InlineKeyboardButton("📊 БЭКТЕСТИНГ", callback_data="menu_backtest")],
         [InlineKeyboardButton("💬 СВЯЗАТЬСЯ С НАМИ", callback_data="menu_contacts")],
         [InlineKeyboardButton(lang_button_text, callback_data=lang_callback)],
     ]
@@ -2322,6 +2782,132 @@ async def test_binance_command(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"❌ Ошибка тестирования Binance: {e}")
         await update.message.reply_text(f"❌ Ошибка Binance: {str(e)}")
 
+async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /backtest для запуска бэктестирования"""
+    try:
+        # Проверяем аргументы
+        if not context.args:
+            await update.message.reply_text(
+                "📊 **БЭКТЕСТИНГ ТОРГОВОГО БОТА**\n\n"
+                "🎯 **Использование:**\n"
+                "`/backtest BTC ETH ADA SOL`\n\n"
+                "📈 **Примеры:**\n"
+                "• `/backtest BTC ETH` - тест на BTC и ETH\n"
+                "• `/backtest ADA SOL XRP` - тест на 3 монетах\n"
+                "• `/backtest ALL` - тест на топ-10 монетах\n\n"
+                "📅 **Период:** 01.01.2025 - сегодня\n"
+                "💰 **Стартовый капитал:** $1,000\n"
+                "⏱️ **Время выполнения:** 3-10 минут\n\n"
+                "⚠️ **Внимание:** Бэктест может занять время!"
+            )
+            return
+        
+        symbols_input = [arg.upper() for arg in context.args]
+        
+        # Подготавливаем список символов
+        if 'ALL' in symbols_input:
+            symbols = ['BTC/USDT', 'ETH/USDT', 'ADA/USDT', 'SOL/USDT', 'XRP/USDT', 
+                      'BNB/USDT', 'DOGE/USDT', 'AVAX/USDT', 'DOT/USDT', 'LINK/USDT']
+        else:
+            symbols = []
+            for symbol in symbols_input:
+                if not symbol.endswith('/USDT'):
+                    symbol += '/USDT'
+                symbols.append(symbol)
+        
+        if len(symbols) > 10:
+            await update.message.reply_text("❌ Максимум 10 монет для бэктестинга!")
+            return
+        
+        # Уведомляем о запуске
+        symbols_text = ', '.join([s.replace('/USDT', '') for s in symbols])
+        progress_msg = await update.message.reply_text(
+            f"🚀 **ЗАПУСКАЮ БЭКТЕСТ**\n\n"
+            f"🪙 **Монеты:** {symbols_text}\n"
+            f"📅 **Период:** 01.01.2025 - {datetime.now().strftime('%d.%m.%Y')}\n"
+            f"💰 **Стартовый капитал:** $1,000\n\n"
+            f"⏳ **Загружаю данные...** (это может занять несколько минут)"
+        )
+        
+        # Запускаем бэктест
+        try:
+            results = bot_state.backtest_engine.run_backtest(symbols)
+            
+            if 'error' in results:
+                await progress_msg.edit_text(f"❌ Ошибка бэктестинга: {results['error']}")
+                return
+            
+            # Формируем отчет
+            win_rate = results['win_rate']
+            total_return = results['total_return']
+            total_trades = results['total_trades']
+            winning_trades = results['winning_trades']
+            losing_trades = total_trades - winning_trades
+            final_balance = results['final_balance']
+            total_pnl = results['total_pnl']
+            
+            # Определяем эмодзи результата
+            if total_return > 20:
+                result_emoji = "🚀💰"
+            elif total_return > 0:
+                result_emoji = "📈✅"
+            elif total_return > -10:
+                result_emoji = "📊⚠️"
+            else:
+                result_emoji = "📉❌"
+            
+            # Статистика по парам
+            symbol_stats = {}
+            for trade in results['trades']:
+                symbol = trade['symbol']
+                if symbol not in symbol_stats:
+                    symbol_stats[symbol] = {'trades': 0, 'pnl': 0, 'wins': 0}
+                symbol_stats[symbol]['trades'] += 1
+                symbol_stats[symbol]['pnl'] += trade['pnl']
+                if trade['pnl'] > 0:
+                    symbol_stats[symbol]['wins'] += 1
+            
+            # Топ-3 прибыльные пары
+            if symbol_stats:
+                top_pairs = sorted(symbol_stats.items(), key=lambda x: x[1]['pnl'], reverse=True)[:3]
+                top_text = ""
+                for symbol, stats in top_pairs:
+                    wr = (stats['wins'] / stats['trades']) * 100 if stats['trades'] > 0 else 0
+                    top_text += f"• {symbol.replace('/USDT', '')}: ${stats['pnl']:.0f} ({wr:.0f}% WR)\n"
+            else:
+                top_text = "Нет данных\n"
+            
+            report = f"""{result_emoji} **РЕЗУЛЬТАТЫ БЭКТЕСТИНГА**
+
+📊 **ОБЩАЯ СТАТИСТИКА:**
+💰 Стартовый капитал: $1,000
+💵 Финальный капитал: ${final_balance:.2f}
+📈 Общая доходность: {total_return:+.1f}%
+💸 Чистая прибыль: ${total_pnl:+.2f}
+
+🎯 **ТОРГОВАЯ СТАТИСТИКА:**
+📊 Всего сделок: {total_trades}
+✅ Прибыльных: {winning_trades} ({win_rate:.1f}%)
+❌ Убыточных: {losing_trades} ({100-win_rate:.1f}%)
+
+🏆 **ТОП-3 ПРИБЫЛЬНЫЕ ПАРЫ:**
+{top_text}
+📅 **Период:** 01.01.2025 - {datetime.now().strftime('%d.%m.%Y')}
+⏱️ **Таймфрейм:** 1 час
+🧠 **Стратегия:** EMA + RSI анализ
+
+⚠️ **Отказ от ответственности:** Результаты прошлого не гарантируют будущую прибыль!"""
+            
+            await progress_msg.edit_text(report)
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка выполнения бэктеста: {e}")
+            await progress_msg.edit_text(f"❌ Ошибка выполнения бэктеста: {str(e)}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка команды /backtest: {e}")
+        await update.message.reply_text(f"❌ Ошибка бэктестинга: {str(e)}")
+
 async def handle_start_ml_training(query, context):
     """Начало обучения ML моделей"""
     try:
@@ -2454,6 +3040,7 @@ def main():
     bot_state.application.add_handler(CommandHandler("signals", signals_command))
     bot_state.application.add_handler(CommandHandler("search", search_command))
     bot_state.application.add_handler(CommandHandler("test_binance", test_binance_command))
+    bot_state.application.add_handler(CommandHandler("backtest", backtest_command))
     bot_state.application.add_handler(CallbackQueryHandler(button_callback))
     
     print("✅ Бот настроен успешно")

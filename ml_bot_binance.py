@@ -1315,7 +1315,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif query.data == "menu_coins":
             await handle_coins_menu(query, context)
         elif query.data == "menu_signals":
-            await handle_signals_menu_new(query, context)
+            await analyze_coin_with_advanced_logic(query, context)
         elif query.data == "menu_analyze":
             await handle_analyze_menu(query, context)
         elif query.data == "menu_search":
@@ -1415,9 +1415,70 @@ async def handle_coins_menu(query, context):
     except Exception as e:
         await query.edit_message_text(f"❌ Ошибка получения списка монет: {str(e)}")
 
-async def handle_signals_menu_new(query, context):
-    """Обработка кнопки Последние сигналы (новая версия - отправляет новое сообщение)"""
+
+async def handle_analyze_menu(query, context):
+    """Обработка кнопки Анализ монеты"""
+    await analyze_coin_with_advanced_logic(query, context)  # Используем продвинутый анализ
+
+async def handle_search_menu(query, context):
+    """Обработка кнопки Поиск монет"""
     try:
+        message = """
+🔍 **Поиск монет**
+
+Для поиска монет используйте команду:
+/search <название>
+
+Примеры:
+/search BTC
+/search ETH
+/search BNB
+        """
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup)
+    except Exception as e:
+        await query.edit_message_text(f"❌ Ошибка поиска: {str(e)}")
+
+async def handle_shooting_stars_menu(query, context):
+    """Обработка кнопки Стреляющие монеты"""
+    try:
+        message = """
+🚀 **Стреляющие монеты**
+
+Анализ всех монет на Binance для поиска потенциальных "стреляющих звезд" - монет, которые могут показать резкий рост в ближайшее время.
+
+**Возможности:**
+• 🔮 LSTM нейронная сеть для предсказаний
+• 📊 Анализ всех USDT пар на Binance
+• 🎯 Топ-10 самых перспективных монет
+• ⚡ Быстрый анализ (до 5 минут)
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("🔮 Найти стреляющие монеты", callback_data="find_shooting_stars")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup)
+    except Exception as e:
+        await query.edit_message_text(f"❌ Ошибка стреляющих монет: {str(e)}")
+
+
+async def analyze_coin_with_advanced_logic(query, context):
+    """Продвинутый анализ монеты с проверкой топ-50 и переобучением"""
+    try:
+        # Проверяем, нужна ли адаптивная переобучение
+        needs_retrain = not is_coin_in_top50(bot_state.current_coin)
+        
+        if needs_retrain:
+            await query.message.reply_text(f"🔄 Анализирую {bot_state.current_coin}...\n\n🆕 Монета не в топ-50, переобучаю модели с учетом этой монеты...\n⏳ Это займет 1-2 минуты...")
+        else:
+            await query.message.reply_text(f"🔍 Анализирую {bot_state.current_coin}...")
+        
         signal_data = analyze_coin_signal_advanced_ema(bot_state.current_coin)
         if not signal_data:
             await query.message.reply_text(f"❌ Ошибка анализа {bot_state.current_coin}")
@@ -1506,60 +1567,8 @@ async def handle_signals_menu_new(query, context):
             await query.message.reply_text(message, reply_markup=reply_markup)
             
     except Exception as e:
-        logger.error(f"❌ Ошибка получения сигналов: {e}")
-        await query.message.reply_text(f"❌ Ошибка получения сигналов: {str(e)}")
-
-async def handle_analyze_menu(query, context):
-    """Обработка кнопки Анализ монеты"""
-    await handle_signals_menu_new(query, context)  # Используем новую версию без ошибок редактирования
-
-async def handle_search_menu(query, context):
-    """Обработка кнопки Поиск монет"""
-    try:
-        message = """
-🔍 **Поиск монет**
-
-Для поиска монет используйте команду:
-/search <название>
-
-Примеры:
-/search BTC
-/search ETH
-/search BNB
-        """
-        
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(message, reply_markup=reply_markup)
-    except Exception as e:
-        await query.edit_message_text(f"❌ Ошибка поиска: {str(e)}")
-
-async def handle_shooting_stars_menu(query, context):
-    """Обработка кнопки Стреляющие монеты"""
-    try:
-        message = """
-🚀 **Стреляющие монеты**
-
-Анализ всех монет на Binance для поиска потенциальных "стреляющих звезд" - монет, которые могут показать резкий рост в ближайшее время.
-
-**Возможности:**
-• 🔮 LSTM нейронная сеть для предсказаний
-• 📊 Анализ всех USDT пар на Binance
-• 🎯 Топ-10 самых перспективных монет
-• ⚡ Быстрый анализ (до 5 минут)
-        """
-        
-        keyboard = [
-            [InlineKeyboardButton("🔮 Найти стреляющие монеты", callback_data="find_shooting_stars")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(message, reply_markup=reply_markup)
-    except Exception as e:
-        await query.edit_message_text(f"❌ Ошибка стреляющих монет: {str(e)}")
-
+        logger.error(f"❌ Ошибка продвинутого анализа: {e}")
+        await query.message.reply_text(f"❌ Ошибка анализа: {str(e)}")
 
 async def handle_coin_selection(query, context):
     """Обработка выбора монеты"""
@@ -1570,9 +1579,9 @@ async def handle_coin_selection(query, context):
     # Отправляем новое сообщение вместо редактирования
     await query.message.reply_text(f"✅ Выбрана монета: {coin}")
     
-    # Автоматически показываем анализ в новом сообщении
+    # Автоматически запускаем продвинутый анализ
     await asyncio.sleep(1)
-    await handle_signals_menu_new(query, context)
+    await analyze_coin_with_advanced_logic(query, context)
 
 async def handle_find_shooting_stars(query, context):
     """Поиск стреляющих монет с помощью продвинутого анализа"""

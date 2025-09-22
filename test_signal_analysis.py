@@ -56,7 +56,7 @@ async def test_signal_analysis():
                 logger.info(f"   ML вход: {signal.get('ml_entry_prob', 0):.3f}")
                 logger.info(f"   ML выход: {signal.get('ml_exit_prob', 0):.3f}")
                 
-                if signal.get('signal_type') != 'ОЖИДАНИЕ':
+                if signal.get('signal_type') != '⚪ ОЖИДАНИЕ':
                     logger.info("✅ Сигнал сгенерирован успешно!")
                     return True
                 else:

@@ -114,7 +114,7 @@ class AdvancedEMAAnalyzer:
             market_phase = df['market_phase'].iloc[-1]
 
             # Попытка использовать ML для более точного анализа
-            signal = 'ОЖИДАНИЕ'
+            signal = '⚪ ОЖИДАНИЕ'
             confidence = 0.0
             ml_entry_prob = 0.0
             ml_exit_prob = 0.0
@@ -132,7 +132,7 @@ class AdvancedEMAAnalyzer:
                         signal = 'LONG'
                         confidence = ml_entry_prob * 100
                     else:
-                        signal = 'ОЖИДАНИЕ'
+                        signal = '⚪ ОЖИДАНИЕ'
                         confidence = (1 - ml_entry_prob) * 100
                         
                 except Exception as ml_error:
@@ -200,12 +200,12 @@ class AdvancedEMAAnalyzer:
     def _generate_signal(self, df: pd.DataFrame, trend_type: int, market_phase: int) -> str:
         """Генерация торгового сигнала"""
         if len(df) < 20:
-            return 'ОЖИДАНИЕ'
+            return '⚪ ОЖИДАНИЕ'
 
         # Простая логика для демонстрации
         if trend_type == 2:  # Восходящий тренд
             return 'LONG'
         elif trend_type == 0:  # Нисходящий тренд
-            return 'ОЖИДАНИЕ'
+            return '⚪ ОЖИДАНИЕ'
         else:  # Боковой тренд
-            return 'LONG' if market_phase == 0 else 'ОЖИДАНИЕ'
+            return 'LONG' if market_phase == 0 else '⚪ ОЖИДАНИЕ'

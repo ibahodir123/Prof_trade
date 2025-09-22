@@ -20,6 +20,7 @@ from typing import Dict, List, Any
 from advanced_ema_analyzer import AdvancedEMAAnalyzer
 from advanced_ml_trainer import AdvancedMLTrainer
 from shooting_star_predictor import ShootingStarPredictor
+import pickle
 
 # Настройка matplotlib для работы без GUI
 import matplotlib
@@ -146,7 +147,7 @@ def get_binance_data(symbol, timeframe='1h', limit=500):
         return None
 
 def prepare_ml_features(df, symbol="unknown"):
-    """Подготавливает все 36 признаков для ML модели"""
+    """Подготавливает все 27 признаков для ML модели"""
     try:
         # Проверяем наличие необходимых колонок
         required_columns = ['close', 'ema_20', 'ema_50', 'ema_100', 'volume']
@@ -222,18 +223,6 @@ def prepare_ml_features(df, symbol="unknown"):
         data['price_ema50_sync'] = np.corrcoef(data['close'], data['ema_50'])[0, 1] if len(data) > 1 else 0
         data['price_ema100_sync'] = np.corrcoef(data['close'], data['ema_100'])[0, 1] if len(data) > 1 else 0
         
-        # 10. Divergence
-        data['price_ema20_divergence'] = data['price_velocity'] - data['ema20_velocity']
-        data['price_ema50_divergence'] = data['price_velocity'] - data['ema50_velocity']
-        data['price_ema100_divergence'] = data['price_velocity'] - data['ema100_velocity']
-        
-        # 11. Volatility
-        data['price_volatility'] = data['close'].rolling(20).std() / data['close'].rolling(20).mean()
-        data['ema20_volatility'] = data['ema_20'].rolling(20).std() / data['ema_20'].rolling(20).mean()
-        
-        # 12. Volume features
-        data['volume_change'] = data['volume'].pct_change()
-        data['volume_price_correlation'] = data['volume'].rolling(20).corr(data['close'])
         
         # Удаляем первые строки с NaN
         data = data.dropna()
@@ -241,7 +230,7 @@ def prepare_ml_features(df, symbol="unknown"):
         # Проверяем на бесконечные значения
         data = data.replace([np.inf, -np.inf], 0)
         
-        # Выбираем только нужные признаки (36 признаков)
+        # Выбираем только нужные признаки (27 признаков)
         feature_columns = [
             'price_velocity', 'ema20_velocity', 'ema50_velocity', 'ema100_velocity',
             'price_acceleration', 'ema20_acceleration', 'ema50_acceleration', 'ema100_acceleration',
@@ -251,9 +240,7 @@ def prepare_ml_features(df, symbol="unknown"):
             'ema20_angle', 'ema50_angle', 'ema100_angle',
             'ema20_angle_change', 'ema50_angle_change', 'ema100_angle_change',
             'ema20_to_ema50', 'ema20_to_ema100', 'ema50_to_ema100',
-            'price_ema20_sync', 'price_ema50_sync', 'price_ema100_sync',
-            'price_ema20_divergence', 'price_ema50_divergence', 'price_ema100_divergence',
-            'price_volatility', 'ema20_volatility', 'volume_change', 'volume_price_correlation'
+            'price_ema20_sync', 'price_ema50_sync', 'price_ema100_sync'
         ]
         
         features = data[feature_columns].fillna(0)
@@ -278,6 +265,110 @@ def is_coin_in_top50(symbol):
     except Exception as e:
         logger.error(f"❌ Ошибка проверки топ-50: {e}")
         return False
+
+def predict_with_smart_ml(features_dict):
+    """Предсказание движения с помощью Smart ML модели"""
+    try:
+        if not bot_state.smart_predictor:
+            return None
+        
+        model = bot_state.smart_predictor['model']
+        
+        # Преобразуем словарь признаков в вектор (27 признаков)
+        feature_vector = []
+        
+        # 1. Скорости (4 признака)
+        vel = features_dict.get('velocities', {})
+        feature_vector.extend([
+            vel.get('price', 0), vel.get('ema20', 0),
+            vel.get('ema50', 0), vel.get('ema100', 0)
+        ])
+        
+        # 2. Ускорения (4 признака)
+        acc = features_dict.get('accelerations', {})
+        feature_vector.extend([
+            acc.get('price', 0), acc.get('ema20', 0),
+            acc.get('ema50', 0), acc.get('ema100', 0)
+        ])
+        
+        # 3. Соотношения скоростей (3 признака)
+        ratio = features_dict.get('velocity_ratios', {})
+        feature_vector.extend([
+            ratio.get('price_ema20', 0), ratio.get('price_ema50', 0),
+            ratio.get('price_ema100', 0)
+        ])
+        
+        # 4. Расстояния до EMA (3 признака)
+        dist = features_dict.get('distances', {})
+        feature_vector.extend([
+            dist.get('price_ema20', 0), dist.get('price_ema50', 0),
+            dist.get('price_ema100', 0)
+        ])
+        
+        # 5. Изменения расстояний (3 признака)
+        dist_ch = features_dict.get('distance_changes', {})
+        feature_vector.extend([
+            dist_ch.get('price_ema20', 0), dist_ch.get('price_ema50', 0),
+            dist_ch.get('price_ema100', 0)
+        ])
+        
+        # 6. Углы EMA (3 признака)
+        angles = features_dict.get('angles', {})
+        feature_vector.extend([
+            angles.get('ema20', 0), angles.get('ema50', 0),
+            angles.get('ema100', 0)
+        ])
+        
+        # 7. Изменения углов (3 признака)
+        angle_ch = features_dict.get('angle_changes', {})
+        feature_vector.extend([
+            angle_ch.get('ema20', 0), angle_ch.get('ema50', 0),
+            angle_ch.get('ema100', 0)
+        ])
+        
+        # 8. Взаимоотношения EMA (3 признака)
+        rel = features_dict.get('ema_relationships', {})
+        feature_vector.extend([
+            rel.get('ema20_ema50', 0), rel.get('ema20_ema100', 0),
+            rel.get('ema50_ema100', 0)
+        ])
+        
+        # 9. Синхронизации (3 признака)
+        sync = features_dict.get('synchronizations', {})
+        feature_vector.extend([
+            sync.get('price_ema20', 0), sync.get('price_ema50', 0),
+            sync.get('price_ema100', 0)
+        ])
+        
+        # Получаем предсказание
+        prediction = model.predict([feature_vector])[0]
+        probabilities = model.predict_proba([feature_vector])[0]
+        
+        class_names = ['Малое (1-3%)', 'Среднее (3-7%)', 'Крупное (7%+)']
+        
+        return {
+            'prediction': class_names[prediction],
+            'probabilities': {
+                'small': probabilities[0],
+                'medium': probabilities[1], 
+                'large': probabilities[2]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка Smart ML предсказания: {e}")
+        return None
+
+def _format_smart_prediction(prediction):
+    """Форматирование Smart ML предсказания"""
+    if not prediction:
+        return ""
+    
+    return f"""🧠 **Smart ML прогноз:** {prediction['prediction']}
+📊 **Вероятности движения:**
+   💰 Малое (1-3%): {prediction['probabilities']['small']:.1%}
+   📈 Среднее (3-7%): {prediction['probabilities']['medium']:.1%}
+   🚀 Крупное (7%+): {prediction['probabilities']['large']:.1%}"""
 
 def adaptive_retrain_for_coin(symbol):
     """Адаптивное переобучение для конкретной монеты"""
@@ -995,6 +1086,7 @@ class BotState:
         self.language = "ru"  # По умолчанию русский, "uz" для узбекского
         self.custom_uzbek_explanations = {}  # Пользовательские объяснения на узбекском
         self.backtest_engine = BacktestEngine()  # Движок бэктестинга
+        self.smart_predictor = None  # ML предиктор движений
     
     def initialize(self):
         """Инициализация состояния бота"""
@@ -1003,9 +1095,27 @@ class BotState:
             self.ema_analyzer = AdvancedEMAAnalyzer()
             self.ml_trainer = AdvancedMLTrainer()
             self.shooting_predictor = ShootingStarPredictor()
+            self.smart_predictor = self._load_smart_predictor()
             logger.info("✅ Состояние бота инициализировано")
         else:
             logger.error("❌ Не удалось загрузить конфигурацию")
+    
+    def _load_smart_predictor(self):
+        """Загрузка умного ML предиктора"""
+        try:
+            # Загружаем модель
+            with open('smart_predictor_model.pkl', 'rb') as f:
+                model = pickle.load(f)
+            
+            # Загружаем названия признаков
+            with open('feature_names.pkl', 'rb') as f:
+                feature_names = pickle.load(f)
+            
+            logger.info("🧠 Smart ML предиктор загружен")
+            return {'model': model, 'feature_names': feature_names}
+        except Exception as e:
+            logger.warning(f"⚠️ Smart предиктор не загружен: {e}")
+            return None
 
 # Глобальный экземпляр состояния
 bot_state = BotState()
@@ -1929,6 +2039,14 @@ async def analyze_coin_with_advanced_logic(query, context):
             await query.message.reply_text(f"❌ Ошибка анализа {bot_state.current_coin}")
             return
         
+        # Добавляем Smart ML предсказание
+        smart_prediction = None
+        if signal_data.get('features'):
+            smart_prediction = predict_with_smart_ml(signal_data['features'])
+            if smart_prediction:
+                logger.info(f"🧠 Smart ML: {smart_prediction['prediction']}")
+                signal_data['smart_prediction'] = smart_prediction
+        
         # Проверяем, является ли это ошибкой "монета не найдена"
         if signal_data.get('error'):
             await query.message.reply_text(f"❌ {signal_data['error']}")
@@ -1949,6 +2067,8 @@ async def analyze_coin_with_advanced_logic(query, context):
 💰 **Цена входа:** ${signal_data['entry_price']:.8f}
 📊 **RSI:** {signal_data['rsi']:.1f}
 🤖 **ML статус:** {signal_data['ml_status']}
+
+{_format_smart_prediction(signal_data.get('smart_prediction'))}
             """
             
             if "LONG" in signal_data['signal_type']:
@@ -1994,6 +2114,8 @@ async def analyze_coin_with_advanced_logic(query, context):
 💰 **Цена входа:** ${signal_data['entry_price']:.8f}
 📊 **RSI:** {signal_data['rsi']:.1f}
 🤖 **ML статус:** {signal_data['ml_status']}
+
+{_format_smart_prediction(signal_data.get('smart_prediction'))}
             """
             
             # Переводим сообщение на выбранный язык
@@ -2643,6 +2765,8 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💰 **Цена входа:** ${signal_data['entry_price']:.8f}
 📊 **RSI:** {signal_data['rsi']:.1f}
 🤖 **ML статус:** {signal_data['ml_status']}
+
+{_format_smart_prediction(signal_data.get('smart_prediction'))}
             """
             
             if "LONG" in signal_data['signal_type']:
@@ -2677,6 +2801,8 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💰 **Цена входа:** ${signal_data['entry_price']:.8f}
 📊 **RSI:** {signal_data['rsi']:.1f}
 🤖 **ML статус:** {signal_data['ml_status']}
+
+{_format_smart_prediction(signal_data.get('smart_prediction'))}
             """
             
             # Переводим сообщение на выбранный язык

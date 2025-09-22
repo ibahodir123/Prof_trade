@@ -845,7 +845,7 @@ def analyze_coin_signal(symbol):
         return None
 
 # Класс для управления состоянием бота
-class BacktestEngine:
+class SmartBacktestEngine:
     def __init__(self):
         self.start_date = datetime(2025, 1, 1)
         self.end_date = datetime.now()
@@ -887,53 +887,57 @@ class BacktestEngine:
             return pd.DataFrame()
     
     def analyze_signal_for_backtest(self, symbol: str, df: pd.DataFrame, current_idx: int) -> Dict[str, Any]:
-        """Анализ сигнала для бэктеста"""
+        """Smart ML анализ сигнала для бэктеста"""
         try:
             historical_data = df.iloc[:current_idx + 1].copy()
             if len(historical_data) < 100:
                 return {'signal': 'WAIT', 'confidence': 0}
             
-            # Простой EMA анализ для бэктеста
+            # Подготавливаем EMA для ML признаков
             historical_data['ema_20'] = historical_data['close'].ewm(span=20).mean()
             historical_data['ema_50'] = historical_data['close'].ewm(span=50).mean()
             historical_data['ema_100'] = historical_data['close'].ewm(span=100).mean()
             
-            # RSI
-            delta = historical_data['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            
-            last_close = historical_data.iloc[-1]['close']
-            last_ema20 = historical_data.iloc[-1]['ema_20']
-            last_ema50 = historical_data.iloc[-1]['ema_50']
-            last_ema100 = historical_data.iloc[-1]['ema_100']
-            last_rsi = rsi.iloc[-1]
-            
-            # Определение сигнала
-            signal = 'WAIT'
-            confidence = 0
-            
-            # LONG сигнал
-            if (last_close > last_ema20 > last_ema50 > last_ema100 and 
-                last_rsi > 30 and last_rsi < 70):
-                signal = 'LONG'
-                confidence = 60 + min(30, (last_close - last_ema20) / last_ema20 * 1000)
-            
-            # SHORT сигнал  
-            elif (last_close < last_ema20 < last_ema50 < last_ema100 and 
-                  last_rsi > 30 and last_rsi < 70):
-                signal = 'SHORT'
-                confidence = 60 + min(30, (last_ema20 - last_close) / last_ema20 * 1000)
-            
-            return {
-                'signal': signal,
-                'confidence': max(0, min(100, confidence)),
-                'price': float(last_close),
-                'rsi': last_rsi
-            }
-        except:
+            try:
+                # Подготавливаем ML признаки
+                features = prepare_ml_features(historical_data, symbol)
+                if not features:
+                    return {'signal': 'WAIT', 'confidence': 0}
+                
+                # Получаем Smart ML предсказание
+                smart_prediction = predict_with_smart_ml(features)
+                if not smart_prediction:
+                    return {'signal': 'WAIT', 'confidence': 0}
+                
+                probabilities = smart_prediction['probabilities']
+                prediction = smart_prediction['prediction']
+                
+                # Генерируем сигнал на основе ML
+                signal = 'WAIT'
+                confidence = 0
+                
+                # Если ML предсказывает среднее или крупное движение - LONG
+                medium_prob = probabilities['medium']
+                large_prob = probabilities['large']
+                
+                if medium_prob > 0.35 or large_prob > 0.15:
+                    signal = 'LONG'
+                    confidence = int((medium_prob + large_prob) * 100)
+                
+                return {
+                    'signal': signal,
+                    'confidence': min(100, max(0, confidence)),
+                    'price': float(historical_data.iloc[-1]['close']),
+                    'ml_prediction': prediction,
+                    'probabilities': probabilities
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка ML анализа в бэктесте: {e}")
+                return {'signal': 'WAIT', 'confidence': 0}
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка анализа сигнала в бэктесте: {e}")
             return {'signal': 'WAIT', 'confidence': 0}
     
     def run_backtest(self, symbols: List[str]) -> Dict[str, Any]:
@@ -1085,7 +1089,7 @@ class BotState:
         self.shooting_predictor = None
         self.language = "ru"  # По умолчанию русский, "uz" для узбекского
         self.custom_uzbek_explanations = {}  # Пользовательские объяснения на узбекском
-        self.backtest_engine = BacktestEngine()  # Движок бэктестинга
+        self.backtest_engine = SmartBacktestEngine()  # Smart ML движок бэктестинга
         self.smart_predictor = None  # ML предиктор движений
     
     def initialize(self):

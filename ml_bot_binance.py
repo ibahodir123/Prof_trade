@@ -2054,11 +2054,16 @@ async def analyze_coin_with_advanced_logic(query, context):
             except Exception as e:
                 logger.error(f"❌ Ошибка подготовки features: {e}")
         
-        if signal_data.get('features'):
-            smart_prediction = predict_with_smart_ml(signal_data['features'])
-            if smart_prediction:
-                logger.info(f"🧠 Smart ML: {smart_prediction['prediction']}")
-                signal_data['smart_prediction'] = smart_prediction
+        if signal_data.get('features') is not None:
+            try:
+                smart_prediction = predict_with_smart_ml(signal_data['features'])
+                if smart_prediction:
+                    logger.info(f"🧠 Smart ML: {smart_prediction['prediction']}")
+                    signal_data['smart_prediction'] = smart_prediction
+                else:
+                    logger.warning("⚠️ Smart ML предсказание вернуло None")
+            except Exception as e:
+                logger.error(f"❌ Ошибка Smart ML предсказания: {e}")
         else:
             logger.warning("⚠️ Features не найдены для Smart ML")
         

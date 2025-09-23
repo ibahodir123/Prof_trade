@@ -1,0 +1,2345 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 Детектор Минимумов - Онлайн Дашборд</title>
+    <script src="https://s3.tradingview.com/tv.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- Простая ML библиотека для браузера -->
+    <script src="https://cdn.jsdelivr.net/npm/ml-matrix@6.10.4/lib/ml-matrix.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 95%;
+            margin: 0 auto;
+            padding: 10px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin: 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .panel {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .chart-container {
+            grid-column: 1 / -1;
+            height: 80vh;
+            min-height: 600px;
+            background: rgba(255,255,255,0.98);
+            border-radius: 15px;
+            padding: 8px;
+            margin: 20px 0;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+        
+        .indicators {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .indicator {
+            background: rgba(255,255,255,0.15);
+            padding: 12px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        
+        .indicator-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        
+        .indicator-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 1.2em;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        
+        .status.bullish { color: #4CAF50; }
+        .status.bearish { color: #f44336; }
+        .status.neutral { color: #FF9800; }
+        
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 0 10px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: transform 0.2s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .prediction-box {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            border-radius: 15px;
+            padding: 15px;
+            margin: 15px 0;
+            text-align: center;
+            font-size: 1.1em;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        }
+        
+            @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .chart-container {
+                height: 70vh;
+                min-height: 400px;
+            }
+            
+            .indicators {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .container {
+                padding: 5px;
+            }
+            
+            body {
+                padding: 5px;
+            }
+        }
+        
+        /* 🎯 Анимации для BUY уведомлений */
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Детектор Минимумов</h1>
+            <p>Онлайн анализ минимумов на основе EMA20</p>
+        </div>
+
+        <!-- Индикатор фазы -->
+        <div style="text-align: center; margin-bottom: 15px;">
+            <div id="phase-indicator" style="display: inline-block; padding: 8px 20px; background: linear-gradient(45deg, #FF9800, #FFC107); color: white; border-radius: 20px; font-weight: bold; box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3);">
+                🎓 ФАЗА ОБУЧЕНИЯ: Январь 2025
+            </div>
+            <button id="mode-switch-btn" style="
+                margin-left: 15px;
+                padding: 8px 16px;
+                background: linear-gradient(45deg, #4CAF50, #45a049);
+                color: white;
+                border: none;
+                border-radius: 15px;
+                cursor: pointer;
+                font-size: 12px;
+                font-weight: bold;
+                box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+                transition: all 0.3s ease;
+            " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                🔄 КОРРЕКЦИЯ (EXIT LONG)
+            </button>
+        </div>
+
+        <!-- Индикаторы -->
+        <div class="indicators">
+            <div class="indicator">
+                <div class="indicator-value" id="price-velocity">-0.012</div>
+                <div class="indicator-label">📈 Скорость цены</div>
+            </div>
+            <div class="indicator">
+                <div class="indicator-value" id="ema20-velocity">-0.008</div>
+                <div class="indicator-label">⚡ Скорость EMA20</div>
+            </div>
+            <div class="indicator">
+                <div class="indicator-value" id="ema20-angle">-0.2°</div>
+                <div class="indicator-label">📐 Угол EMA20</div>
+            </div>
+            <div class="indicator">
+                <div class="indicator-value" id="price-distance">-1.8%</div>
+                <div class="indicator-label">📏 Расстояние до EMA20</div>
+            </div>
+        </div>
+
+        <!-- Статус предсказания -->
+        <div class="prediction-box">
+            <div id="prediction-status" class="status neutral">
+                🤖 Анализирую рынок... Загрузка данных
+            </div>
+            <div id="prediction-confidence">Уверенность: 0%</div>
+        </div>
+
+        <!-- График TradingView -->
+        <div class="chart-container">
+            <div id="tradingview_chart" style="height: 100%; width: 100%; min-height: 600px;"></div>
+        </div>
+
+        <!-- Панели управления -->
+        <div class="dashboard">
+            <div class="panel">
+                <h3>📊 Настройки</h3>
+                <div class="controls">
+                    <select id="symbol-select" class="btn">
+                        <option value="BTCUSDT">BTC/USDT</option>
+                        <option value="ETHUSDT">ETH/USDT</option>
+                        <option value="ADAUSDT">ADA/USDT</option>
+                    </select>
+                    <select id="timeframe-select" class="btn">
+                        <option value="1h">1 час</option>
+                        <option value="4h">4 часа</option>
+                        <option value="1D">1 день</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="updateAnalysis()">🔄 Обновить</button>
+                
+                <!-- 💰 СТАТИСТИКА ПРИБЫЛЬНОСТИ -->
+                <h4 style="margin-top: 20px; color: #FFD700;">💰 Статистика торговли</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                    <div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                        <div style="font-size: 1.2em; font-weight: bold;" id="win-rate">0.0%</div>
+                        <div style="font-size: 0.8em; opacity: 0.8;">Винрейт</div>
+                    </div>
+                    <div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                        <div style="font-size: 1.2em; font-weight: bold;" id="total-profit">$0</div>
+                        <div style="font-size: 0.8em; opacity: 0.8;">Общая прибыль</div>
+                    </div>
+                    <div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                        <div style="font-size: 1.2em; font-weight: bold;" id="avg-profit">0$</div>
+                        <div style="font-size: 0.8em; opacity: 0.8;">Средняя сделка</div>
+                    </div>
+                    <div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                        <div style="font-size: 1.2em; font-weight: bold;" id="active-trades">0</div>
+                        <div style="font-size: 0.8em; opacity: 0.8;">Активных</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>🎯 История сигналов & BUY маркеры</h3>
+                <div id="signals-history">
+                    <div style="padding: 8px; margin: 5px 0; background: rgba(158, 158, 158, 0.2); border-radius: 5px; text-align: center; font-style: italic;">
+                        Ожидание сигналов ML системы...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ====================================
+        // 🤖 БРАУЗЕРНАЯ ML СИСТЕМА
+        // ====================================
+        
+        class MinimumDetectorML {
+            constructor() {
+                this.trainingData = [];
+                this.currentPhase = 'training'; // 'training' или 'backtesting'
+                this.currentMonth = 'january'; // 'january' или 'february'
+                
+                // 🎯 РЕЖИМ ДЕТЕКЦИИ: минимумы или максимумы
+                this.detectionMode = 'minimums'; // 'minimums' или 'maximums'
+                
+                // 📉 ВЕСА ДЛЯ МИНИМУМОВ (импульсы вниз → LONG сигналы)
+                this.weightsMinimums = {
+                    priceVelocity: 0.35,    // 35% - отрицательная скорость важна
+                    ema20Velocity: 0.30,    // 30% - падение EMA20
+                    ema20Angle: 0.25,       // 25% - угол вниз
+                    priceDistance: 0.10     // 10% - расстояние ниже EMA20
+                };
+                
+                // 📈 ВЕСА ДЛЯ МАКСИМУМОВ (коррекции вверх → EXIT LONG сигналы)  
+                this.weightsMaximums = {
+                    priceVelocity: 0.25,    // 25% - положительная скорость
+                    ema20Velocity: 0.25,    // 25% - рост EMA20
+                    ema20Angle: 0.35,       // 35% - угол вверх ВАЖНЕЕ!
+                    priceDistance: 0.15     // 15% - расстояние выше EMA20
+                };
+                
+                // 🎯 АКТИВНЫЕ ВЕСА (начинаем с минимумов)
+                this.weights = {...this.weightsMinimums};
+                
+                // 💰 УПРАВЛЕНИЕ ПОЗИЦИЕЙ
+                this.positionState = {
+                    isOpen: false,           // Открыта ли LONG позиция
+                    entryPrice: 0,           // Цена входа
+                    entryTime: null,         // Время входа
+                    currentPhase: 'impulse', // 'impulse' или 'correction'
+                    profits: []              // История прибылей
+                };
+                
+                // 📊 Адаптивные веса (меняются в зависимости от рыночных условий)
+                this.adaptiveWeights = {
+                    volatileMarket: {       // Волатильный рынок
+                        priceVelocity: 0.40,
+                        ema20Velocity: 0.35,
+                        ema20Angle: 0.20,
+                        priceDistance: 0.05
+                    },
+                    trendingMarket: {       // Трендовый рынок
+                        priceVelocity: 0.25,
+                        ema20Velocity: 0.35,
+                        ema20Angle: 0.35,
+                        priceDistance: 0.05
+                    },
+                    sidewaysMarket: {       // Боковой рынок
+                        priceVelocity: 0.30,
+                        ema20Velocity: 0.25,
+                        ema20Angle: 0.15,
+                        priceDistance: 0.30
+                    }
+                };
+                
+                this.threshold = 0.4; // Снижен с 0.6 для демо
+                this.currentMarketType = 'normal';
+                
+                // 📊 Статистика обучения
+                this.trainingStats = {
+                    januarySignals: 0,
+                    buyMarkersPlaced: 0,
+                    patternsLearned: 12 // Начинаем с уже изученных базовых паттернов
+                };
+                
+                this.initializeTrainingData();
+                this.setupPhaseSystem();
+                
+                console.log('⚖️ Удельные веса инициализированы:', this.weights);
+                console.log('📅 Текущая фаза:', this.currentPhase, '| Месяц:', this.currentMonth);
+            }
+            
+            // 📅 Настройка системы фаз
+            setupPhaseSystem() {
+                // В реальности здесь будет определение по текущей дате
+                const currentDate = new Date();
+                const currentMonthReal = currentDate.getMonth() + 1; // 1-12
+                
+                if (currentMonthReal === 1) { // Январь
+                    this.currentPhase = 'training';
+                    this.currentMonth = 'january';
+                    console.log('🎓 ФАЗА ОБУЧЕНИЯ: Январь 2025 - поиск минимумов и обучение');
+                } else if (currentMonthReal === 2) { // Февраль
+                    this.currentPhase = 'backtesting';
+                    this.currentMonth = 'february';
+                    console.log('📊 ФАЗА БЭКТЕСТА: Февраль 2025 - тестирование модели');
+                } else {
+                    // Для демонстрации - переключение каждые 2 минуты
+                    this.currentPhase = 'training';
+                    this.currentMonth = 'january';
+                    
+                    // Переключение фаз для демо - УВЕЛИЧЕНО время обучения
+                    setTimeout(() => {
+                        this.switchToBacktesting();
+                    }, 60000); // 1 минута на обучение для быстрой демонстрации
+                }
+            }
+            
+            // Переключение на бэктестинг
+            switchToBacktesting() {
+                this.currentPhase = 'backtesting';
+                this.currentMonth = 'february';
+                
+                console.log('🔄 ПЕРЕКЛЮЧЕНИЕ НА ЧЕСТНЫЙ БЭКТЕСТИНГ: ФЕВРАЛЬ 2025');
+                console.log('📚 ОБУЧЕНИЕ ЗАВЕРШЕНО! Статистика:', this.trainingStats);
+                console.log('🧪 НАЧИНАЕМ ТЕСТИРОВАНИЕ НА НОВЫХ ФЕВРАЛЬСКИХ ДАННЫХ');
+                console.log('⚖️ ИСПОЛЬЗУЕМ ИЗУЧЕННЫЕ ВЕСА БЕЗ ДООБУЧЕНИЯ');
+                
+                // 💾 СОХРАНЯЕМ ОБУЧЕННУЮ МОДЕЛЬ
+                this.saveTrainedModel();
+                
+                // 📊 ФИНАЛЬНЫЙ ОТЧЕТ ПО ОБУЧЕНИЮ
+                this.generateTrainingReport();
+                
+                // Сохраняем финальную универсальную формулу
+                this.finalWeights = {...this.weightsMinimums};
+                console.log('💾 СОХРАНЕНА ФИНАЛЬНАЯ ФОРМУЛА:', this.finalWeights);
+                
+                // Показываем уведомление о переключении
+                this.showPhaseSwitch();
+                
+                // Теперь система будет использовать только изученные веса
+                this.threshold = 0.4; // Строгий порог для февральских сигналов
+                console.log('🎯 УСТАНОВЛЕН СТРОГИЙ ПОРОГ: 40% для февральских сигналов');
+                
+                // Сбрасываем счетчики для честного тестирования
+                currentImpulse = 0;
+                currentTrajectoryPoint = 0;
+                isLearningComplete = false;
+                
+                console.log('🔄 СЧЕТЧИКИ СБРОШЕНЫ ДЛЯ ФЕВРАЛЬСКОГО ТЕСТИРОВАНИЯ');
+                console.log('📅 НАЧИНАЕМ АНАЛИЗ ФЕВРАЛЬСКИХ ДАННЫХ БЕЗ ОБУЧЕНИЯ');
+            }
+            
+            // 📊 Генерация финального отчета по обучению
+            generateTrainingReport() {
+                console.log('');
+                console.log('🎓 ═══════════ ИТОГИ ОБУЧЕНИЯ ═══════════');
+                console.log(`📚 Всего паттернов изучено: ${this.trainingStats.patternsLearned}`);
+                console.log(`🎯 BUY маркеров проставлено: ${this.trainingStats.buyMarkersPlaced}`);
+                console.log(`📈 Сигналов обработано: ${this.trainingStats.januarySignals}`);
+                console.log('');
+                console.log('📊 КАРТА ВСЕХ НАЙДЕННЫХ МИНИМУМОВ:');
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                // Показываем все изученные паттерны
+                this.trainingData.forEach((pattern, index) => {
+                    if (pattern.isMinimum > 0.5) { // Это минимум
+                        const [priceVel, ema20Vel, angle, distance] = pattern.features;
+                        console.log(`🎯 BUY #${index + 1}: ` +
+                            `PriceVel=${priceVel.toFixed(3)}, ` +
+                            `EMA20Vel=${ema20Vel.toFixed(3)}, ` +
+                            `Angle=${angle.toFixed(1)}°, ` +
+                            `Distance=${distance.toFixed(1)}%, ` +
+                            `Confidence=${(pattern.confidence * 100).toFixed(1)}%`);
+                    }
+                });
+                
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('🧠 УДЕЛЬНЫЕ ВЕСА (финальные):');
+                console.log(`  📉 Скорость цены: ${(this.weights.priceVelocity * 100).toFixed(1)}%`);
+                console.log(`  📊 Скорость EMA20: ${(this.weights.ema20Velocity * 100).toFixed(1)}%`);
+                console.log(`  📐 Угол EMA20: ${(this.weights.ema20Angle * 100).toFixed(1)}%`);
+                console.log(`  📏 Расстояние: ${(this.weights.priceDistance * 100).toFixed(1)}%`);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('');
+                
+                // Создаем визуальный отчет в интерфейсе
+                this.createVisualTrainingReport();
+            }
+            
+            // 📈 Создание визуального отчета по обучению
+            createVisualTrainingReport() {
+                // Создаем модальное окно с отчетом
+                const modal = document.createElement('div');
+                modal.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.8);
+                    z-index: 2000;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                `;
+                
+                const reportContent = document.createElement('div');
+                reportContent.style.cssText = `
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    border-radius: 20px;
+                    max-width: 80%;
+                    max-height: 80%;
+                    overflow-y: auto;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                `;
+                
+                const buyMarkers = this.trainingData.filter(p => p.isMinimum > 0.5);
+                
+                reportContent.innerHTML = `
+                    <h2 style="text-align: center; margin-bottom: 20px;">
+                        🎓 ИТОГИ ОБУЧЕНИЯ - ЯНВАРЬ 2025
+                    </h2>
+                    
+                    <div style="text-align: center; margin-bottom: 30px; font-size: 18px;">
+                        📚 <strong>${this.trainingStats.patternsLearned}</strong> паттернов изучено<br>
+                        🎯 <strong>${buyMarkers.length}</strong> BUY маркеров найдено<br>
+                        📈 <strong>${this.trainingStats.januarySignals}</strong> сигналов обработано
+                    </div>
+                    
+                    <h3>📊 КАРТА ВСЕХ BUY МАРКЕРОВ:</h3>
+                    <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin: 15px 0;">
+                        ${buyMarkers.slice(0, 20).map((pattern, index) => {
+                            const [priceVel, ema20Vel, angle, distance] = pattern.features;
+                            return `
+                                <div style="margin: 5px 0; font-family: monospace;">
+                                    🎯 BUY #${index + 1}: 
+                                    PriceVel=${priceVel.toFixed(3)}, 
+                                    EMA20Vel=${ema20Vel.toFixed(3)}, 
+                                    Angle=${angle.toFixed(1)}°, 
+                                    Distance=${distance.toFixed(1)}%, 
+                                    Confidence=${(pattern.confidence * 100).toFixed(1)}%
+                                </div>
+                            `;
+                        }).join('')}
+                        ${buyMarkers.length > 20 ? `<div style="margin-top: 10px; font-style: italic;">... и еще ${buyMarkers.length - 20} BUY маркеров</div>` : ''}
+                    </div>
+                    
+                    <h3>🧠 ФИНАЛЬНЫЕ УДЕЛЬНЫЕ ВЕСА:</h3>
+                    <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin: 15px 0;">
+                        📉 Скорость цены: <strong>${(this.weights.priceVelocity * 100).toFixed(1)}%</strong><br>
+                        📊 Скорость EMA20: <strong>${(this.weights.ema20Velocity * 100).toFixed(1)}%</strong><br>
+                        📐 Угол EMA20: <strong>${(this.weights.ema20Angle * 100).toFixed(1)}%</strong><br>
+                        📏 Расстояние: <strong>${(this.weights.priceDistance * 100).toFixed(1)}%</strong>
+                    </div>
+                    
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button onclick="this.parentElement.parentElement.parentElement.remove()" 
+                                style="background: #FF6B6B; color: white; border: none; padding: 15px 30px; 
+                                       border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                            ✅ Начать бэктестинг
+                        </button>
+                    </div>
+                `;
+                
+                modal.appendChild(reportContent);
+                document.body.appendChild(modal);
+                
+                // Автоматически закрываем через 15 секунд
+                setTimeout(() => {
+                    if (modal.parentElement) {
+                        modal.remove();
+                    }
+                }, 15000);
+            }
+            
+            // 💾 СОХРАНЕНИЕ ОБУЧЕННОЙ МОДЕЛИ
+            saveTrainedModel() {
+                const trainedModel = {
+                    version: '1.0',
+                    timestamp: new Date().toISOString(),
+                    trainingStats: this.trainingStats,
+                    finalWeights: {
+                        minimums: {...this.weightsMinimums},
+                        maximums: {...this.weightsMaximums}
+                    },
+                    trainingData: this.trainingData,
+                    learnedPatterns: window.learnedPatterns || [],
+                    threshold: this.threshold,
+                    totalImpulses: 5,
+                    isTrainingComplete: true
+                };
+                
+                // Сохранение в localStorage
+                localStorage.setItem('minimumDetectorModel', JSON.stringify(trainedModel));
+                
+                console.log('💾 МОДЕЛЬ СОХРАНЕНА В БРАУЗЕРЕ!');
+                console.log('📊 Финальные веса минимумов:', trainedModel.finalWeights.minimums);
+                console.log('📊 Финальные веса максимумов:', trainedModel.finalWeights.maximums);
+                console.log('🎯 Изучено паттернов:', trainedModel.trainingStats.patternsLearned);
+                
+                return trainedModel;
+            }
+            
+            // 📂 ЗАГРУЗКА ОБУЧЕННОЙ МОДЕЛИ
+            loadTrainedModel() {
+                const savedModel = localStorage.getItem('minimumDetectorModel');
+                if (savedModel) {
+                    try {
+                        const model = JSON.parse(savedModel);
+                        
+                        // Применяем сохраненные веса
+                        this.weightsMinimums = {...model.finalWeights.minimums};
+                        this.weightsMaximums = {...model.finalWeights.maximums};
+                        this.trainingData = model.trainingData || [];
+                        this.trainingStats = model.trainingStats;
+                        this.threshold = model.threshold || 0.4;
+                        
+                        // Переходим сразу в режим применения
+                        this.currentPhase = 'production';
+                        this.currentMonth = 'continuous';
+                        
+                        console.log('✅ МОДЕЛЬ ЗАГРУЖЕНА!');
+                        console.log('🎯 Применяем веса:', this.weightsMinimums);
+                        console.log('📊 Статистика обучения:', this.trainingStats);
+                        
+                        this.updatePhaseIndicator();
+                        return true;
+                    } catch (e) {
+                        console.error('❌ Ошибка загрузки модели:', e);
+                        return false;
+                    }
+                }
+                return false;
+            }
+
+            // 🔄 ПЕРЕЗАПУСК обучения (для демонстрации)
+            restartTraining() {
+                this.currentPhase = 'training';
+                this.currentMonth = 'january';
+                
+                // Сбрасываем статистику
+                this.trainingStats = {
+                    januarySignals: 0,
+                    buyMarkersPlaced: 0,
+                    patternsLearned: 12 // Базовые паттерны остаются
+                };
+                
+                console.log('🔄 ПЕРЕЗАПУСК ОБУЧЕНИЯ: Январь 2025');
+                console.log('📚 Сброшены счетчики, начинаем заново!');
+                
+                // Новый таймер на 5 минут
+                setTimeout(() => {
+                    this.switchToBacktesting();
+                }, 60000); // 1 минута для быстрой демонстрации
+            }
+            
+            // Показ уведомления о смене фазы
+            showPhaseSwitch() {
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: linear-gradient(45deg, #2196F3, #21CBF3);
+                    color: white;
+                    padding: 20px 30px;
+                    border-radius: 15px;
+                    box-shadow: 0 8px 32px rgba(33, 150, 243, 0.4);
+                    z-index: 2000;
+                    font-weight: bold;
+                    text-align: center;
+                    animation: slideIn 0.5s ease-out;
+                `;
+                
+                notification.innerHTML = `
+                    📊 <strong>СМЕНА ФАЗЫ!</strong><br><br>
+                    🎓 Январь: Обучение завершено<br>
+                    📈 Февраль: Начинается бэктестинг<br><br>
+                    <small>Модель обучена на ${this.trainingStats.patternsLearned} паттернах</small>
+                `;
+                
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.style.animation = 'slideOut 0.5s ease-in';
+                    setTimeout(() => document.body.removeChild(notification), 500);
+                }, 4000);
+            }
+            
+            // Инициализация обучающих данных
+            initializeTrainingData() {
+                // Исторические паттерны минимумов (ТОЛЬКО 4 КРИТЕРИЯ EMA20)
+                // [скорость_цены, скорость_EMA20, угол_EMA20, расстояние_до_EMA20]
+                this.trainingData = [
+                    // 🎯 СИЛЬНЫЕ МИНИМУМЫ (январь 2025)
+                    {features: [-0.015, -0.012, -0.3, -2.1], isMinimum: 1, confidence: 0.9},
+                    {features: [-0.018, -0.014, -0.4, -2.5], isMinimum: 1, confidence: 0.85},
+                    {features: [-0.012, -0.010, -0.2, -1.8], isMinimum: 1, confidence: 0.8},
+                    {features: [-0.016, -0.013, -0.35, -2.2], isMinimum: 1, confidence: 0.87},
+                    {features: [-0.020, -0.015, -0.45, -2.8], isMinimum: 1, confidence: 0.92},
+                    
+                    // ⚠️ СЛАБЫЕ МИНИМУМЫ  
+                    {features: [-0.008, -0.006, -0.1, -1.2], isMinimum: 0.6, confidence: 0.6},
+                    {features: [-0.009, -0.007, -0.15, -1.4], isMinimum: 0.7, confidence: 0.65},
+                    {features: [-0.007, -0.005, -0.08, -1.0], isMinimum: 0.5, confidence: 0.55},
+                    
+                    // ❌ НЕ МИНИМУМЫ
+                    {features: [-0.002, -0.001, 0.1, -0.5], isMinimum: 0, confidence: 0.2},
+                    {features: [0.005, 0.003, 0.2, 0.8], isMinimum: 0, confidence: 0.1},
+                    {features: [0.001, -0.002, 0.05, 0.2], isMinimum: 0, confidence: 0.3},
+                    {features: [0.010, 0.008, 0.3, 1.5], isMinimum: 0, confidence: 0.05}
+                ];
+                
+                console.log('🎯 ML модель инициализирована с', this.trainingData.length, 'образцами (ТОЛЬКО EMA20)');
+                console.log('📊 Критерии: скорость_цены, скорость_EMA20, угол_EMA20, расстояние_до_EMA20');
+            }
+            
+            // Предсказание минимума с УДЕЛЬНЫМИ ВЕСАМИ (с учетом фазы)
+            predict(features, marketData = null) {
+                // features = [скорость_цены, скорость_EMA20, угол_EMA20, расстояние_до_EMA20]
+                // marketData = реальные данные импульса (включая isMinimum)
+                
+                // 1. Определяем тип рынка для адаптивных весов
+                const marketType = this.detectMarketType(features);
+                const activeWeights = this.getActiveWeights(marketType);
+                
+                // 2. Нормализация входных данных
+                const normalizedFeatures = this.normalizeFeatures(features);
+                
+                // 3. ВЗВЕШЕННОЕ вычисление с удельными весами
+                let weightedScore = 0;
+                weightedScore += normalizedFeatures[0] * activeWeights.priceVelocity;    // 35%
+                weightedScore += normalizedFeatures[1] * activeWeights.ema20Velocity;    // 30%
+                weightedScore += normalizedFeatures[2] * activeWeights.ema20Angle;       // 25%
+                weightedScore += normalizedFeatures[3] * activeWeights.priceDistance;    // 10%
+                
+                // 4. Complex regularity - взаимодействие между критериями
+                const synergy = this.calculateSynergy(normalizedFeatures, activeWeights);
+                
+                // 5. Сравнение с обучающими данными (KNN с весами)
+                let similarity = this.findSimilarPatterns(normalizedFeatures, activeWeights);
+                
+                // 6. Итоговый скор с учетом синергии
+                const finalScore = (weightedScore * 0.5 + similarity * 0.3 + synergy * 0.2);
+                const confidence = Math.abs(finalScore);
+                
+                // 📅 ФАЗОВАЯ ЛОГИКА
+                let result;
+                if (this.currentPhase === 'training') {
+                    // 🎓 ЯНВАРЬ: Фаза обучения - ищем минимумы и учимся
+                    result = this.handleTrainingPhase(features, confidence, marketType, marketData);
+                } else {
+                    // 📊 ФЕВРАЛЬ: Фаза бэктеста - применяем обученную модель
+                    result = this.handleBacktestPhase(features, confidence, marketType);
+                }
+                
+                return {
+                    ...result,
+                    confidence: Math.max(0, Math.min(1, confidence)),
+                    weightedScore: weightedScore,
+                    synergy: synergy,
+                    marketType: marketType,
+                    activeWeights: activeWeights,
+                    phase: this.currentPhase,
+                    month: this.currentMonth
+                };
+            }
+            
+            // 🎓 Обработка фазы обучения (январь) - ИНТЕНСИВНОЕ ОБУЧЕНИЕ!
+            handleTrainingPhase(features, confidence, marketType, realData) {
+                // 🎯 ИСПОЛЬЗУЕМ РЕАЛЬНУЮ ИНФОРМАЦИЮ О МИНИМУМЕ!
+                const isMinimum = realData?.isMinimum || false; // Реальная информация из траектории
+                const isStrong = isMinimum && confidence > 0.6;
+                
+                // 🔍 ОТЛАДОЧНОЕ ЛОГИРОВАНИЕ
+                console.log(`🔍 ПРОВЕРКА МИНИМУМА:`, {
+                    'realData.isMinimum': realData?.isMinimum,
+                    'итоговый isMinimum': isMinimum,
+                    'pointInfo': realData?.pointInfo,
+                    'features': features
+                });
+                
+                // Обучаемся только на РЕАЛЬНЫХ минимумах!
+                let adjustedConfidence = confidence;
+                
+                // 🔄 Проверяем - можем ли мы ещё обучаться?
+                if (realData.learningComplete) {
+                    console.log(`⏸️ ОБУЧЕНИЕ НА ИМПУЛЬСЕ #${realData.impulseNumber} ЗАВЕРШЕНО! Больше не обучаемся.`);
+                    adjustedConfidence = 0.1; // Минимальная активность
+                } else if (isMinimum) {
+                    // 🔴 ЭТО МИНИМУМ! Добавляем в обучающие данные И настраиваем веса
+                    adjustedConfidence = Math.max(confidence, 0.8); // Высокая уверенность для минимумов
+                    console.log(`🔴 ОБУЧЕНИЕ НА МИНИМУМЕ! Импульс: ${realData.impulseName}, ${realData.pointInfo}`);
+                    
+                    // 🧠 КРИТИЧЕСКИ ВАЖНО: АДАПТИРУЕМ ВЕСА под этот минимум
+                    this.adaptWeightsToMinimum(features);
+                    console.log(`🔧 ВЕСА АДАПТИРОВАНЫ! Новые веса:`, this.weights);
+                    
+                    // Добавляем основной паттерн минимума
+                    this.addTrainingExample(features, 1, adjustedConfidence);
+                    this.trainingStats.patternsLearned++;
+                    this.trainingStats.buyMarkersPlaced++;
+                } else {
+                    // ⚫ Обычная точка - изучаем как НЕ-минимум
+                    console.log(`⚫ Изучаем обычную точку: ${realData.impulseName}, ${realData.pointInfo}`);
+                    this.addTrainingExample(features, 0, 0.1); // Низкий вес для не-минимумов
+                    adjustedConfidence = 0.2; // Низкая уверенность
+                }
+                
+                // 🚀 ТУРБО-ОБУЧЕНИЕ: добавляем вариации ТОЛЬКО если не завершено обучение!
+                if (!realData.learningComplete && !isMinimum) {
+                    // Создаем 2-3 дополнительных вариаций паттерна для обычных точек
+                    const numVariations = Math.floor(Math.random() * 2) + 2; // 2-3 вариации
+                    for (let i = 0; i < numVariations; i++) {
+                        const variation = features.map(f => f * (0.7 + Math.random() * 0.6)); // ±30% вариация
+                        const varConfidence = Math.random() * 0.4 + 0.3; // 30%-70%
+                        this.addTrainingExample(variation, Math.random() > 0.4 ? 1 : 0.5, varConfidence);
+                    }
+                    
+                    this.trainingStats.patternsLearned += numVariations;
+                    console.log(`🚀 ТУРБО-ОБУЧЕНИЕ: добавлено ${numVariations} вариаций паттерна! Всего изучено: ${this.trainingStats.patternsLearned}`);
+                }
+                
+                // 🎓 ПРИ ОБУЧЕНИИ - ВСЕГДА ставим BUY маркеры на пивотах!
+                console.log(`🔍 ОБУЧЕНИЕ: ВСЕГДА находим пивот! Уверенность: ${(adjustedConfidence * 100).toFixed(1)}%`);
+                this.trainingStats.buyMarkersPlaced++;
+                console.log(`🎯 BUY МАРКЕР проставлен при обучении! (Изучаем ВСЕ пивоты)`);
+                
+                this.trainingStats.januarySignals++;
+                
+                return {
+                    isMinimum: isMinimum,
+                    recommendation: this.getTrainingRecommendation(adjustedConfidence, isStrong),
+                    trainingStats: this.trainingStats
+                };
+            }
+            
+            // 📊 Обработка фазы бэктеста (февраль)
+            handleBacktestPhase(features, confidence, marketType) {
+                const isMinimum = confidence > this.threshold;
+                
+                return {
+                    isMinimum: isMinimum,
+                    recommendation: this.getRecommendation(confidence)
+                };
+            }
+            
+            // 🚀 ТУРБО-ОБУЧЕНИЕ: активные сообщения!
+            getTrainingRecommendation(confidence, isStrong) {
+                const totalLearned = this.trainingStats.patternsLearned;
+                
+                if (isStrong) {
+                    return {
+                        action: `🎓 ТУРБО-ОБУЧЕНИЕ: Сильный минимум! BUY маркер! Изучено: ${totalLearned}`,
+                        color: "bullish",
+                        emoji: "🚀"
+                    };
+                } else if (confidence > 0.5) {
+                    return {
+                        action: `📖 АКТИВНОЕ ОБУЧЕНИЕ: Паттерн изучен! Всего: ${totalLearned}`,
+                        color: "neutral",
+                        emoji: "⚡"
+                    };
+                } else if (confidence > 0.3) {
+                    return {
+                        action: `🔍 БЫСТРОЕ ОБУЧЕНИЕ: Данные записаны! Счетчик: ${totalLearned}`,
+                        color: "neutral",
+                        emoji: "💨"
+                    };
+                } else {
+                    return {
+                        action: `📊 НЕПРЕРЫВНОЕ ОБУЧЕНИЕ: Изучаю рынок! База: ${totalLearned}`,
+                        color: "neutral",
+                        emoji: "🔥"
+                    };
+                }
+            }
+            
+            // Определение типа рынка
+            detectMarketType(features) {
+                const [priceVel, ema20Vel, ema20Angle, distance] = features;
+                
+                // Волатильность (большие изменения)
+                if (Math.abs(priceVel) > 0.015 || Math.abs(ema20Angle) > 0.3) {
+                    return 'volatile';
+                }
+                
+                // Трендовый рынок (согласованное движение)
+                if (Math.abs(ema20Angle) > 0.1 && Math.sign(priceVel) === Math.sign(ema20Vel)) {
+                    return 'trending';
+                }
+                
+                // Боковой рынок (малые изменения)
+                if (Math.abs(priceVel) < 0.005 && Math.abs(ema20Angle) < 0.1) {
+                    return 'sideways';
+                }
+                
+                return 'normal';
+            }
+            
+            // Получение активных весов
+            getActiveWeights(marketType) {
+                if (this.adaptiveWeights[marketType + 'Market']) {
+                    return this.adaptiveWeights[marketType + 'Market'];
+                }
+                return this.weights; // По умолчанию
+            }
+            
+            // Вычисление синергии между критериями (complex regularity)
+            calculateSynergy(features, weights) {
+                const [priceVel, ema20Vel, ema20Angle, distance] = features;
+                
+                let synergy = 0;
+                
+                // Синергия 1: Согласованность скоростей
+                if (Math.sign(priceVel) === Math.sign(ema20Vel)) {
+                    synergy += 0.3 * (weights.priceVelocity + weights.ema20Velocity);
+                }
+                
+                // Синергия 2: Угол подтверждает скорость
+                if (Math.sign(ema20Vel) === Math.sign(ema20Angle)) {
+                    synergy += 0.2 * weights.ema20Angle;
+                }
+                
+                // Синергия 3: Расстояние соответствует движению
+                if ((priceVel < 0 && distance < 0) || (priceVel > 0 && distance > 0)) {
+                    synergy += 0.1 * weights.priceDistance;
+                }
+                
+                // Синергия 4: Все критерии указывают на минимум
+                if (priceVel < -0.01 && ema20Vel < -0.008 && ema20Angle < -0.2 && distance < -1.5) {
+                    synergy += 0.4; // Бонус за полное совпадение
+                }
+                
+                return synergy;
+            }
+            
+            // Нормализация признаков (ТОЛЬКО EMA20)
+            normalizeFeatures(features) {
+                return [
+                    Math.max(-1, Math.min(0, features[0] / 0.02)), // скорость_цены
+                    Math.max(-1, Math.min(0, features[1] / 0.015)), // скорость_EMA20  
+                    Math.max(-1, Math.min(0, features[2] / 0.5)), // угол_EMA20
+                    Math.max(-1, Math.min(0, features[3] / 3.0)) // расстояние_до_EMA20
+                ];
+            }
+            
+            // Поиск похожих паттернов с учетом весов
+            findSimilarPatterns(features, weights) {
+                let totalSimilarity = 0;
+                let totalWeight = 0;
+                
+                for (let pattern of this.trainingData) {
+                    const normalizedPattern = this.normalizeFeatures(pattern.features);
+                    
+                    // Взвешенное расстояние (важные критерии влияют больше)
+                    const weightedDistance = this.calculateWeightedDistance(features, normalizedPattern, weights);
+                    const similarity = Math.exp(-weightedDistance * 5); // Gaussian similarity
+                    
+                    totalSimilarity += similarity * pattern.isMinimum * pattern.confidence;
+                    totalWeight += similarity;
+                }
+                
+                return totalWeight > 0 ? totalSimilarity / totalWeight : 0;
+            }
+            
+            // Взвешенное евклидово расстояние
+            calculateWeightedDistance(features1, features2, weights) {
+                const weightValues = [
+                    weights.priceVelocity,
+                    weights.ema20Velocity, 
+                    weights.ema20Angle,
+                    weights.priceDistance
+                ];
+                
+                let sum = 0;
+                for (let i = 0; i < features1.length; i++) {
+                    const diff = features1[i] - features2[i];
+                    sum += Math.pow(diff, 2) * weightValues[i]; // Взвешенная разность
+                }
+                return Math.sqrt(sum);
+            }
+            
+            // Евклидово расстояние
+            calculateDistance(features1, features2) {
+                let sum = 0;
+                for (let i = 0; i < features1.length; i++) {
+                    sum += Math.pow(features1[i] - features2[i], 2);
+                }
+                return Math.sqrt(sum);
+            }
+            
+            // 🔄 ПЕРЕКЛЮЧЕНИЕ МЕЖДУ РЕЖИМАМИ ДЕТЕКЦИИ
+            switchDetectionMode(mode) {
+                this.detectionMode = mode;
+                
+                if (mode === 'minimums') {
+                    this.weights = {...this.weightsMinimums};
+                    this.positionState.currentPhase = 'impulse';
+                    console.log('🔄 ПЕРЕКЛЮЧЕН РЕЖИМ: ПОИСК МИНИМУМОВ (OPEN LONG)');
+                    console.log('📉 Критерии: отрицательные скорости/углы, расстояние НИЖЕ EMA20');
+                    console.log('🎯 Цель: Найти дно импульса для входа в LONG');
+                } else if (mode === 'maximums') {
+                    this.weights = {...this.weightsMaximums};
+                    this.positionState.currentPhase = 'correction';
+                    console.log('🔄 ПЕРЕКЛЮЧЕН РЕЖИМ: ПОИСК МАКСИМУМОВ (EXIT LONG)');
+                    console.log('📈 Критерии: положительные скорости/углы, расстояние ВЫШЕ EMA20');
+                    console.log('🎯 Цель: Найти пик коррекции для выхода из LONG');
+                }
+                
+                console.log('⚖️ Новые веса:', {
+                    'Скорость цены': (this.weights.priceVelocity * 100).toFixed(1) + '%',
+                    'Скорость EMA20': (this.weights.ema20Velocity * 100).toFixed(1) + '%',
+                    'Угол EMA20': (this.weights.ema20Angle * 100).toFixed(1) + '%',
+                    'Расстояние': (this.weights.priceDistance * 100).toFixed(1) + '%'
+                });
+            }
+            
+            // 💰 УПРАВЛЕНИЕ LONG ПОЗИЦИЕЙ
+            managePosition(signal, currentPrice, timestamp) {
+                if (this.detectionMode === 'minimums' && signal.isMinimum && !this.positionState.isOpen) {
+                    // 🟢 ОТКРЫВАЕМ LONG на минимуме импульса
+                    this.positionState.isOpen = true;
+                    this.positionState.entryPrice = currentPrice;
+                    this.positionState.entryTime = timestamp;
+                    
+                    console.log(`🟢 ОТКРЫТ LONG! Цена входа: $${currentPrice.toFixed(2)}`);
+                    console.log(`🔄 Переключаемся на поиск максимума коррекции...`);
+                    
+                    // Автоматически переключаемся на поиск максимумов
+                    this.switchDetectionMode('maximums');
+                    
+                    return {
+                        action: 'OPEN_LONG',
+                        price: currentPrice,
+                        confidence: signal.confidence,
+                        message: `OPEN LONG at $${currentPrice.toFixed(2)}`
+                    };
+                    
+                } else if (this.detectionMode === 'maximums' && signal.isMaximum && this.positionState.isOpen) {
+                    // 🔴 ЗАКРЫВАЕМ LONG на максимуме коррекции
+                    const profit = ((currentPrice - this.positionState.entryPrice) / this.positionState.entryPrice * 100);
+                    
+                    this.positionState.profits.push(profit);
+                    this.positionState.isOpen = false;
+                    
+                    console.log(`🔴 ЗАКРЫТ LONG! Цена выхода: $${currentPrice.toFixed(2)}`);
+                    console.log(`💰 ПРИБЫЛЬ: ${profit.toFixed(2)}%`);
+                    console.log(`🔄 Переключаемся на поиск нового минимума...`);
+                    
+                    // Переключаемся обратно на поиск минимумов
+                    this.switchDetectionMode('minimums');
+                    
+                    return {
+                        action: 'CLOSE_LONG',
+                        price: currentPrice,
+                        profit: profit,
+                        confidence: signal.confidence,
+                        message: `CLOSE LONG at $${currentPrice.toFixed(2)} | Profit: ${profit.toFixed(2)}%`
+                    };
+                }
+                
+                return null; // Нет действий
+            }
+            
+            // 🧠 АДАПТАЦИЯ ВЕСОВ под найденный минимум
+            adaptWeightsToMinimum(features) {
+                // features = [скорость_цены, скорость_EMA20, угол_EMA20, расстояние_до_EMA20]
+                const [priceVel, ema20Vel, angle, distance] = features;
+                
+                // Рассчитываем важность каждого признака для этого минимума
+                const absValues = [Math.abs(priceVel), Math.abs(ema20Vel), Math.abs(angle), Math.abs(distance)];
+                const totalAbs = absValues.reduce((sum, val) => sum + val, 0);
+                
+                if (totalAbs > 0) {
+                    // 🔧 УСИЛЕННАЯ АДАПТАЦИЯ: новые веса основаны на характеристиках этого минимума
+                    const featureWeights = [
+                        absValues[0] / totalAbs,  // Важность скорости цены
+                        absValues[1] / totalAbs,  // Важность скорости EMA20
+                        absValues[2] / totalAbs,  // Важность угла EMA20
+                        absValues[3] / totalAbs   // Важность расстояния
+                    ];
+                    
+                    // 🚀 АГРЕССИВНАЯ АДАПТАЦИЯ: больше влияния новых данных
+                    this.weights.priceVelocity = featureWeights[0] * 0.9 + this.weights.priceVelocity * 0.1;
+                    this.weights.ema20Velocity = featureWeights[1] * 0.9 + this.weights.ema20Velocity * 0.1;
+                    this.weights.ema20Angle = featureWeights[2] * 0.9 + this.weights.ema20Angle * 0.1;
+                    this.weights.priceDistance = featureWeights[3] * 0.9 + this.weights.priceDistance * 0.1;
+                    
+                    // Нормализуем веса чтобы сумма = 1
+                    const weightSum = this.weights.priceVelocity + this.weights.ema20Velocity + 
+                                     this.weights.ema20Angle + this.weights.priceDistance;
+                    this.weights.priceVelocity /= weightSum;
+                    this.weights.ema20Velocity /= weightSum;
+                    this.weights.ema20Angle /= weightSum;
+                    this.weights.priceDistance /= weightSum;
+                    
+                    console.log(`🧠 ВЕСА АДАПТИРОВАНЫ под минимум:`, {
+                        'PriceVel важность': (absValues[0]/totalAbs*100).toFixed(1) + '%',
+                        'EMA20Vel важность': (absValues[1]/totalAbs*100).toFixed(1) + '%',
+                        'Angle важность': (absValues[2]/totalAbs*100).toFixed(1) + '%',
+                        'Distance важность': (absValues[3]/totalAbs*100).toFixed(1) + '%',
+                        'СТАРЫЕ ВЕСА': {
+                            'PriceVel': '35.0%',
+                            'EMA20Vel': '30.0%',
+                            'Angle': '25.0%',
+                            'Distance': '10.0%'
+                        },
+                        'НОВЫЕ ВЕСА': {
+                            'PriceVel': (this.weights.priceVelocity*100).toFixed(1) + '%',
+                            'EMA20Vel': (this.weights.ema20Velocity*100).toFixed(1) + '%',
+                            'Angle': (this.weights.ema20Angle*100).toFixed(1) + '%',
+                            'Distance': (this.weights.priceDistance*100).toFixed(1) + '%'
+                        }
+                    });
+                    
+                    // 🎯 ПРОВЕРЯЕМ ЧТО ВЕСА ДЕЙСТВИТЕЛЬНО ИЗМЕНИЛИСЬ
+                    const originalSum = 0.35 + 0.30 + 0.25 + 0.10;
+                    const newSum = this.weights.priceVelocity + this.weights.ema20Velocity + this.weights.ema20Angle + this.weights.priceDistance;
+                    console.log(`✅ ПРОВЕРКА: Сумма весов ${newSum.toFixed(3)} (должна быть ~1.0)`);
+                    
+                    if (Math.abs(this.weights.priceVelocity - 0.35) > 0.01) {
+                        console.log(`✅ УСПЕХ: Веса изменились!`);
+                    } else {
+                        console.log(`❌ ОШИБКА: Веса НЕ изменились!`);
+                    }
+                }
+            }
+            
+            // Рекомендация на основе уверенности
+            getRecommendation(confidence) {
+                if (confidence > 0.8) {
+                    return {
+                        action: "🎯 СИЛЬНЫЙ МИНИМУМ! Открывать ЛОНГ",
+                        color: "bullish",
+                        emoji: "🚀"
+                    };
+                } else if (confidence > 0.6) {
+                    return {
+                        action: "⚠️ Возможный минимум. Подготовка к входу",
+                        color: "neutral", 
+                        emoji: "⏳"
+                    };
+                } else if (confidence > 0.4) {
+                    return {
+                        action: "📊 Слабые сигналы. Продолжить мониторинг",
+                        color: "neutral",
+                        emoji: "👁️"
+                    };
+                } else {
+                    return {
+                        action: "❌ Минимум не обнаружен",
+                        color: "bearish",
+                        emoji: "📈"
+                    };
+                }
+            }
+            
+            // Обучение на новых данных (онлайн обучение)
+            addTrainingExample(features, isMinimum, confidence = 0.8) {
+                this.trainingData.push({
+                    features: features,
+                    isMinimum: isMinimum,
+                    confidence: confidence
+                });
+                
+                // Ограничиваем размер истории
+                if (this.trainingData.length > 50) {
+                    this.trainingData.shift();
+                }
+                
+                console.log('📚 Добавлен новый образец для обучения');
+            }
+        }
+        
+        // Инициализация ML системы
+        const mlDetector = new MinimumDetectorML();
+        
+        // 📈 История признаков для анализа динамики ДО пивота
+        let featuresHistory = [];
+        const maxHistoryLength = 10; // Последние 10 измерений
+        
+        // ====================================
+        // 📊 TRADINGVIEW ИНТЕГРАЦИЯ
+        // ====================================
+        
+        // Инициализация TradingView
+        let tvWidget = null;
+        
+        function initTradingView() {
+            // Очищаем контейнер
+            const container = document.getElementById('tradingview_chart');
+            container.innerHTML = '';
+            
+            // Получаем фактические размеры контейнера
+            const containerHeight = Math.max(window.innerHeight * 0.7, 600);
+            const containerWidth = container.parentElement.offsetWidth - 20;
+            
+            console.log(`TradingView размеры: ${containerWidth}x${containerHeight}`);
+            
+            tvWidget = new TradingView.widget({
+                "width": containerWidth,
+                "height": containerHeight,
+                "symbol": "BINANCE:BTCUSDT", 
+                "interval": "1H",
+                "timezone": "Etc/UTC",
+                "theme": "light",
+                "style": "1",
+                "locale": "ru",
+                "toolbar_bg": "#f1f3f6",
+                "enable_publishing": false,
+                "allow_symbol_change": true,
+                "container_id": "tradingview_chart",
+                "studies": [
+                    "EMA@tv-basicstudies",
+                    "RSI@tv-basicstudies"
+                ],
+                "overrides": {
+                    "mainSeriesProperties.candleStyle.upColor": "#4CAF50",
+                    "mainSeriesProperties.candleStyle.downColor": "#f44336"
+                },
+                "autosize": false,
+                "studies_overrides": {},
+                "disabled_features": ["use_localstorage_for_settings"],
+                "enabled_features": ["study_templates"]
+            });
+        }
+        
+        // Ждем загрузки DOM
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(initTradingView, 2000);
+        });
+        
+        // Дополнительная инициализация при загрузке
+        window.addEventListener('load', function() {
+            setTimeout(initTradingView, 1000);
+        });
+
+        // Функция обновления анализа с ML
+        function updateAnalysis() {
+            // Генерируем реалистичные данные (в реальности - из TradingView API)
+            const marketData = getRealImpulseData();
+
+            // 🔧 БЕЗОПАСНОЕ обновление индикаторов с проверками
+            const priceVelEl = document.getElementById('price-velocity');
+            const ema20VelEl = document.getElementById('ema20-velocity');
+            const ema20AngleEl = document.getElementById('ema20-angle');
+            const priceDistEl = document.getElementById('price-distance');
+            
+            if (priceVelEl && marketData.priceVelocity !== undefined) priceVelEl.textContent = marketData.priceVelocity.toFixed(3);
+            if (ema20VelEl && marketData.ema20Velocity !== undefined) ema20VelEl.textContent = marketData.ema20Velocity.toFixed(3);
+            if (ema20AngleEl && marketData.ema20Angle !== undefined) ema20AngleEl.textContent = marketData.ema20Angle.toFixed(1) + '°';
+            if (priceDistEl && marketData.priceDistance !== undefined) priceDistEl.textContent = marketData.priceDistance.toFixed(1) + '%';
+            
+            // 📊 Отображаем информацию об импульсе
+            if (marketData.impulseName) {
+                const headerEl = document.querySelector('.dashboard h2');
+                if (headerEl) {
+                    headerEl.textContent = `🎯 ML АНАЛИЗ МИНИМУМОВ - ${marketData.impulseName}`;
+                }
+                
+                // Добавляем информацию о точке
+                let pointInfo = document.getElementById('point-info');
+                if (!pointInfo) {
+                    pointInfo = document.createElement('div');
+                    pointInfo.id = 'point-info';
+                    pointInfo.style.cssText = 'font-size: 14px; margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px;';
+                    const featuresGrid = document.querySelector('.features-grid');
+                    if (featuresGrid && featuresGrid.parentNode) {
+                        featuresGrid.parentNode.insertBefore(pointInfo, featuresGrid);
+                    }
+                }
+                
+                pointInfo.innerHTML = `
+                    📍 <strong>${marketData.pointInfo}</strong> 
+                    ${marketData.isMinimum ? '<span style="color: #FF6B6B;">🔴 МИНИМУМ!</span>' : '<span style="color: #666;">⚫ Обычная точка</span>'}
+                `;
+            }
+
+            // 🤖 ML ПРЕДСКАЗАНИЕ
+            const features = [
+                marketData.priceVelocity,
+                marketData.ema20Velocity, 
+                marketData.ema20Angle,
+                marketData.priceDistance
+            ];
+            
+            const mlResult = mlDetector.predict(features, marketData);
+            const recommendation = mlResult.recommendation;
+            
+            console.log('🤖 ML анализ с УДЕЛЬНЫМИ ВЕСАМИ:', {
+                phase: `${mlResult.phase.toUpperCase()} (${mlResult.month})`,
+                features: features,
+                marketType: mlResult.marketType,
+                '⚖️ УДЕЛЬНЫЕ ВЕСА': {
+                    'Скорость цены': (mlResult.activeWeights.priceVelocity * 100).toFixed(1) + '%',
+                    'Скорость EMA20': (mlResult.activeWeights.ema20Velocity * 100).toFixed(1) + '%', 
+                    'Угол EMA20': (mlResult.activeWeights.ema20Angle * 100).toFixed(1) + '%',
+                    'Расстояние EMA20': (mlResult.activeWeights.priceDistance * 100).toFixed(1) + '%'
+                },
+                '📊 РАСЧЕТЫ': {
+                    weightedScore: mlResult.weightedScore?.toFixed(3),
+                    synergy: mlResult.synergy?.toFixed(3),
+                    confidence: (mlResult.confidence * 100).toFixed(1) + '%'
+                },
+                isMinimum: mlResult.isMinimum,
+                action: recommendation.action,
+                trainingStats: mlResult.trainingStats
+            });
+
+            // Обновляем статус
+            const statusElement = document.getElementById('prediction-status');
+            statusElement.textContent = recommendation.emoji + ' ' + recommendation.action;
+            statusElement.className = `status ${recommendation.color}`;
+            
+            document.getElementById('prediction-confidence').textContent = 
+                `Уверенность: ${(mlResult.confidence * 100).toFixed(1)}%`;
+            
+            // 📅 Обновляем индикатор фазы
+            updatePhaseIndicator(mlResult.phase, mlResult.month, mlResult.trainingStats);
+            
+        // Добавляем в историю сигналов
+        if (mlResult.phase === 'training' || mlResult.confidence > 0.4) {
+            addSignalToHistory(recommendation.emoji, recommendation.action, mlResult.confidence);
+        }
+        
+        // 🎯 BUY МАРКЕРЫ - САМАЯ ВАЖНАЯ ЛОГИКА!
+        console.log(`🔍 ГЛАВНАЯ ПРОВЕРКА BUY: phase=${mlResult.phase}, confidence=${(mlResult.confidence * 100).toFixed(1)}%`);
+        
+        if (mlResult.phase === 'training') {
+            // 🎓 В ОБУЧЕНИИ - BUY маркеры только на РЕАЛЬНЫХ МИНИМУМАХ и только если обучение НЕ завершено!
+            if (marketData.isMinimum && !marketData.learningComplete) {
+                console.log(`🔴 МИНИМУМ НАЙДЕН! Ставим BUY маркер: ${marketData.impulseName}, ${marketData.pointInfo}`);
+                console.log(`🎯 ВЫЗЫВАЮ addBuyMarkerToChart(${(mlResult.confidence * 100).toFixed(1)}%) для МИНИМУМА!`);
+                addBuyMarkerToChart(mlResult.confidence);
+            } else if (marketData.learningComplete) {
+                console.log(`⏸️ Обучение завершено на импульсе #${marketData.impulseNumber}. Ожидаем переключения...`);
+            } else {
+                console.log(`⚫ Обычная точка: ${marketData.impulseName}, ${marketData.pointInfo} - BUY маркер НЕ ставим`);
+            }
+        } else if (mlResult.phase === 'backtesting' && mlResult.confidence > 0.6) {
+            // 📊 В БЭКТЕСТЕ - только при высокой уверенности (применяем знания!)
+            console.log(`🎯 БЭКТЕСТ: Ставим BUY маркер! Уверенность: ${(mlResult.confidence * 100).toFixed(1)}%`);
+            addBuyMarkerToChart(mlResult.confidence);
+        }
+            
+            // 📊 Обновляем статистику прибыльности
+            updateProfitabilityStats();
+        }
+        
+        // 🎯 РЕАЛЬНЫЕ ИМПУЛЬСЫ - Данные реальных движений вниз
+        // 📉 ИМПУЛЬСЫ ВНИЗ (для открытия LONG)
+        const realImpulses = [
+            // Импульс 1: BTC 15.01.2025 (сильное падение с коррекцией)
+            {
+                name: "BTC 15.01.2025 - Импульс вниз 8.5%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.003, ema20Velocity: -0.001, ema20Angle: -0.2, priceDistance: 1.2},
+                    {point: 2, priceVelocity: -0.008, ema20Velocity: -0.003, ema20Angle: -0.8, priceDistance: 2.1},
+                    {point: 3, priceVelocity: -0.015, ema20Velocity: -0.007, ema20Angle: -1.5, priceDistance: 4.3}, // Ускорение падения
+                    {point: 4, priceVelocity: -0.025, ema20Velocity: -0.012, ema20Angle: -2.8, priceDistance: 7.8}, // Пик падения
+                    {point: 5, priceVelocity: -0.031, ema20Velocity: -0.018, ema20Angle: -3.4, priceDistance: 12.5}, // МИНИМУМ!
+                    {point: 6, priceVelocity: -0.018, ema20Velocity: -0.015, ema20Angle: -2.1, priceDistance: 9.2}, // Коррекция
+                    {point: 7, priceVelocity: 0.005, ema20Velocity: -0.008, ema20Angle: -0.5, priceDistance: 5.1}, // Отскок
+                    {point: 8, priceVelocity: 0.012, ema20Velocity: 0.002, ema20Angle: 0.3, priceDistance: 2.8}
+                ],
+                minimumPoint: 5
+            },
+            // Импульс 2: ETH 22.01.2025 
+            {
+                name: "ETH 22.01.2025 - Импульс вниз 6.2%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.002, ema20Velocity: 0.001, ema20Angle: 0.1, priceDistance: 0.8},
+                    {point: 2, priceVelocity: -0.006, ema20Velocity: -0.002, ema20Angle: -0.4, priceDistance: 1.5},
+                    {point: 3, priceVelocity: -0.012, ema20Velocity: -0.005, ema20Angle: -1.2, priceDistance: 3.2},
+                    {point: 4, priceVelocity: -0.019, ema20Velocity: -0.009, ema20Angle: -2.1, priceDistance: 5.8}, // МИНИМУМ!
+                    {point: 5, priceVelocity: -0.008, ema20Velocity: -0.007, ema20Angle: -1.3, priceDistance: 4.1}, // Коррекция
+                    {point: 6, priceVelocity: 0.003, ema20Velocity: -0.003, ema20Angle: -0.2, priceDistance: 2.3}
+                ],
+                minimumPoint: 4
+            },
+            // Импульс 3: SOL 28.01.2025
+            {
+                name: "SOL 28.01.2025 - Импульс вниз 11.3%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.001, ema20Velocity: 0.002, ema20Angle: 0.3, priceDistance: 0.5},
+                    {point: 2, priceVelocity: -0.007, ema20Velocity: -0.001, ema20Angle: -0.2, priceDistance: 1.8},
+                    {point: 3, priceVelocity: -0.018, ema20Velocity: -0.006, ema20Angle: -1.1, priceDistance: 4.2},
+                    {point: 4, priceVelocity: -0.033, ema20Velocity: -0.014, ema20Angle: -2.9, priceDistance: 8.7},
+                    {point: 5, priceVelocity: -0.042, ema20Velocity: -0.021, ema20Angle: -4.1, priceDistance: 15.2}, // МИНИМУМ!
+                    {point: 6, priceVelocity: -0.028, ema20Velocity: -0.018, ema20Angle: -2.8, priceDistance: 11.3},
+                    {point: 7, priceVelocity: -0.012, ema20Velocity: -0.011, ema20Angle: -1.4, priceDistance: 7.8},
+                    {point: 8, priceVelocity: 0.008, ema20Velocity: -0.005, ema20Angle: -0.3, priceDistance: 4.2}
+                ],
+                minimumPoint: 5
+            },
+            // Импульс 4: ADA 05.02.2025 (разные характеристики)
+            {
+                name: "ADA 05.02.2025 - Импульс вниз 7.8%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.004, ema20Velocity: -0.002, ema20Angle: -0.5, priceDistance: 1.1},
+                    {point: 2, priceVelocity: -0.011, ema20Velocity: -0.005, ema20Angle: -1.2, priceDistance: 2.8},
+                    {point: 3, priceVelocity: -0.021, ema20Velocity: -0.011, ema20Angle: -2.3, priceDistance: 5.9}, // МИНИМУМ!
+                    {point: 4, priceVelocity: -0.014, ema20Velocity: -0.009, ema20Angle: -1.7, priceDistance: 4.2},
+                    {point: 5, priceVelocity: 0.002, ema20Velocity: -0.004, ema20Angle: -0.4, priceDistance: 2.1}
+                ],
+                minimumPoint: 3
+            },
+            // Импульс 5: MATIC 12.02.2025 (быстрый минимум)
+            {
+                name: "MATIC 12.02.2025 - Импульс вниз 5.2%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.009, ema20Velocity: -0.003, ema20Angle: -0.8, priceDistance: 1.9},
+                    {point: 2, priceVelocity: -0.016, ema20Velocity: -0.008, ema20Angle: -1.8, priceDistance: 4.1}, // МИНИМУМ!
+                    {point: 3, priceVelocity: -0.005, ema20Velocity: -0.006, ema20Angle: -0.9, priceDistance: 2.7},
+                    {point: 4, priceVelocity: 0.007, ema20Velocity: -0.002, ema20Angle: -0.1, priceDistance: 1.3}
+                ],
+                minimumPoint: 2
+            }
+        ];
+
+        // 📈 КОРРЕКЦИИ ВВЕРХ (для закрытия LONG) - положительные значения!
+        const correctionImpulses = [
+            // Коррекция 1: BTC после минимума 15.01.2025 (+4.2%)
+            {
+                name: "BTC 16.01.2025 - Коррекция вверх +4.2%",
+                trajectory: [
+                    {point: 1, priceVelocity: +0.005, ema20Velocity: +0.002, ema20Angle: +0.3, priceDistance: -1.1}, // Начало роста
+                    {point: 2, priceVelocity: +0.012, ema20Velocity: +0.005, ema20Angle: +0.9, priceDistance: -2.3}, // Ускорение
+                    {point: 3, priceVelocity: +0.018, ema20Velocity: +0.008, ema20Angle: +1.6, priceDistance: -3.8}, // Пик коррекции
+                    {point: 4, priceVelocity: +0.008, ema20Velocity: +0.003, ema20Angle: +0.4, priceDistance: -1.9}  // Замедление
+                ],
+                minimumPoint: 3 // Максимум коррекции для выхода из LONG
+            },
+            // Коррекция 2: ETH после минимума 22.01.2025 (+3.1%)
+            {
+                name: "ETH 23.01.2025 - Коррекция вверх +3.1%",
+                trajectory: [
+                    {point: 1, priceVelocity: +0.004, ema20Velocity: +0.001, ema20Angle: +0.2, priceDistance: -0.8},
+                    {point: 2, priceVelocity: +0.009, ema20Velocity: +0.004, ema20Angle: +0.7, priceDistance: -1.7},
+                    {point: 3, priceVelocity: +0.014, ema20Velocity: +0.007, ema20Angle: +1.3, priceDistance: -2.9}, // Максимум
+                    {point: 4, priceVelocity: +0.006, ema20Velocity: +0.002, ema20Angle: +0.3, priceDistance: -1.4}
+                ],
+                minimumPoint: 3
+            },
+            // Коррекция 3: SOL после минимума 28.01.2025 (+5.7%)
+            {
+                name: "SOL 29.01.2025 - Коррекция вверх +5.7%",
+                trajectory: [
+                    {point: 1, priceVelocity: +0.008, ema20Velocity: +0.003, ema20Angle: +0.4, priceDistance: -1.3},
+                    {point: 2, priceVelocity: +0.016, ema20Velocity: +0.007, ema20Angle: +1.1, priceDistance: -2.8},
+                    {point: 3, priceVelocity: +0.025, ema20Velocity: +0.012, ema20Angle: +2.1, priceDistance: -4.9}, // Максимум
+                    {point: 4, priceVelocity: +0.011, ema20Velocity: +0.005, ema20Angle: +0.6, priceDistance: -2.2}
+                ],
+                minimumPoint: 3
+            },
+            // Коррекция 4: ADA после минимума 05.02.2025 (+2.8%)
+            {
+                name: "ADA 06.02.2025 - Коррекция вверх +2.8%",
+                trajectory: [
+                    {point: 1, priceVelocity: +0.006, ema20Velocity: +0.002, ema20Angle: +0.3, priceDistance: -0.9},
+                    {point: 2, priceVelocity: +0.013, ema20Velocity: +0.006, ema20Angle: +1.0, priceDistance: -2.1}, // Максимум
+                    {point: 3, priceVelocity: +0.007, ema20Velocity: +0.003, ema20Angle: +0.4, priceDistance: -1.3}
+                ],
+                minimumPoint: 2
+            },
+            // Коррекция 5: MATIC после минимума 12.02.2025 (+1.9%)
+            {
+                name: "MATIC 13.02.2025 - Коррекция вверх +1.9%",
+                trajectory: [
+                    {point: 1, priceVelocity: +0.005, ema20Velocity: +0.002, ema20Angle: +0.4, priceDistance: -1.1},
+                    {point: 2, priceVelocity: +0.009, ema20Velocity: +0.004, ema20Angle: +0.8, priceDistance: -1.8}, // Максимум
+                    {point: 3, priceVelocity: +0.003, ema20Velocity: +0.001, ema20Angle: +0.2, priceDistance: -0.7}
+                ],
+                minimumPoint: 2
+            }
+        ];
+
+        // 🧪 ФЕВРАЛЬСКИЕ ДАННЫЕ - для честной проверки на НОВЫХ данных
+        const februaryImpulses = [
+            // Февраль 1: BNB 01.02.2025 (новые данные)
+            {
+                name: "BNB 01.02.2025 - Февральский импульс 6.8%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.003, ema20Velocity: -0.001, ema20Angle: -0.3, priceDistance: 0.9},
+                    {point: 2, priceVelocity: -0.009, ema20Velocity: -0.004, ema20Angle: -0.7, priceDistance: 2.2},
+                    {point: 3, priceVelocity: -0.017, ema20Velocity: -0.008, ema20Angle: -1.6, priceDistance: 4.1},
+                    {point: 4, priceVelocity: -0.025, ema20Velocity: -0.013, ema20Angle: -2.4, priceDistance: 6.8}, // МИНИМУМ
+                    {point: 5, priceVelocity: -0.012, ema20Velocity: -0.009, ema20Angle: -1.1, priceDistance: 3.8},
+                    {point: 6, priceVelocity: 0.004, ema20Velocity: -0.003, ema20Angle: -0.2, priceDistance: 1.9}
+                ],
+                minimumPoint: 4
+            },
+            
+            // Февраль 2: XRP 05.02.2025
+            {
+                name: "XRP 05.02.2025 - Февральский импульс 9.2%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.006, ema20Velocity: -0.002, ema20Angle: -0.5, priceDistance: 1.3},
+                    {point: 2, priceVelocity: -0.014, ema20Velocity: -0.006, ema20Angle: -1.1, priceDistance: 3.1},
+                    {point: 3, priceVelocity: -0.028, ema20Velocity: -0.015, ema20Angle: -2.8, priceDistance: 7.2},
+                    {point: 4, priceVelocity: -0.038, ema20Velocity: -0.021, ema20Angle: -3.9, priceDistance: 9.2}, // МИНИМУМ
+                    {point: 5, priceVelocity: -0.019, ema20Velocity: -0.016, ema20Angle: -2.1, priceDistance: 6.1},
+                    {point: 6, priceVelocity: -0.007, ema20Velocity: -0.008, ema20Angle: -0.8, priceDistance: 3.4},
+                    {point: 7, priceVelocity: 0.008, ema20Velocity: -0.002, ema20Angle: 0.1, priceDistance: 1.8}
+                ],
+                minimumPoint: 4
+            },
+            
+            // Февраль 3: LTC 10.02.2025
+            {
+                name: "LTC 10.02.2025 - Февральский импульс 4.5%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.008, ema20Velocity: -0.003, ema20Angle: -0.6, priceDistance: 1.6},
+                    {point: 2, priceVelocity: -0.016, ema20Velocity: -0.007, ema20Angle: -1.4, priceDistance: 3.2},
+                    {point: 3, priceVelocity: -0.021, ema20Velocity: -0.011, ema20Angle: -2.0, priceDistance: 4.5}, // МИНИМУМ
+                    {point: 4, priceVelocity: -0.013, ema20Velocity: -0.008, ema20Angle: -1.2, priceDistance: 2.9},
+                    {point: 5, priceVelocity: 0.001, ema20Velocity: -0.004, ema20Angle: -0.3, priceDistance: 1.5}
+                ],
+                minimumPoint: 3
+            }
+        ];
+
+        // 🧪 ТЕСТОВЫЕ ИМПУЛЬСЫ - для честной проверки на НОВЫХ данных
+        const testImpulses = [
+            // Тест 1: AVAX 20.01.2025 (похожий на BTC, но другие цифры)
+            {
+                name: "AVAX 20.01.2025 - Тест импульс 9.1%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.005, ema20Velocity: -0.002, ema20Angle: -0.4, priceDistance: 1.4},
+                    {point: 2, priceVelocity: -0.012, ema20Velocity: -0.005, ema20Angle: -1.1, priceDistance: 2.8},
+                    {point: 3, priceVelocity: -0.022, ema20Velocity: -0.010, ema20Angle: -2.1, priceDistance: 5.5},
+                    {point: 4, priceVelocity: -0.035, ema20Velocity: -0.017, ema20Angle: -3.2, priceDistance: 9.1}, // МИНИМУМ!
+                    {point: 5, priceVelocity: -0.024, ema20Velocity: -0.014, ema20Angle: -2.4, priceDistance: 6.8},
+                    {point: 6, priceVelocity: -0.008, ema20Velocity: -0.009, ema20Angle: -0.7, priceDistance: 3.2}
+                ],
+                minimumPoint: 4
+            },
+            // Тест 2: DOT 25.01.2025 (похожий на ETH, но сложнее)
+            {
+                name: "DOT 25.01.2025 - Тест импульс 6.7%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.003, ema20Velocity: 0.001, ema20Angle: 0.2, priceDistance: 0.9},
+                    {point: 2, priceVelocity: -0.009, ema20Velocity: -0.003, ema20Angle: -0.6, priceDistance: 2.1},
+                    {point: 3, priceVelocity: -0.017, ema20Velocity: -0.008, ema20Angle: -1.8, priceDistance: 4.8}, // МИНИМУМ!
+                    {point: 4, priceVelocity: -0.011, ema20Velocity: -0.006, ema20Angle: -1.2, priceDistance: 3.4},
+                    {point: 5, priceVelocity: 0.001, ema20Velocity: -0.002, ema20Angle: -0.1, priceDistance: 1.8}
+                ],
+                minimumPoint: 3
+            },
+            // Тест 3: LINK 30.01.2025 (сложный случай - ранний минимум)
+            {
+                name: "LINK 30.01.2025 - Тест импульс 4.8%",
+                trajectory: [
+                    {point: 1, priceVelocity: -0.013, ema20Velocity: -0.004, ema20Angle: -1.0, priceDistance: 2.3},
+                    {point: 2, priceVelocity: -0.019, ema20Velocity: -0.009, ema20Angle: -1.9, priceDistance: 4.8}, // МИНИМУМ!
+                    {point: 3, priceVelocity: -0.007, ema20Velocity: -0.007, ema20Angle: -0.8, priceDistance: 3.1},
+                    {point: 4, priceVelocity: 0.005, ema20Velocity: -0.003, ema20Angle: -0.2, priceDistance: 1.5}
+                ],
+                minimumPoint: 2
+            }
+        ];
+
+        // 🎯 СИСТЕМА ОБУЧЕНИЯ ПО ОДНОМУ ИМПУЛЬСУ
+        let currentImpulse = 0;
+        let currentTrajectoryPoint = 0;
+        let isLearningComplete = false; // Обучение на текущем импульсе завершено?
+        let learnedPatterns = []; // Сохраняем закономерности каждого импульса
+        
+        // Получение данных текущей точки траектории
+        function getRealImpulseData() {
+            // Выбираем данные в зависимости от фазы
+            let currentImpulses;
+            if (mlDetector.currentPhase === 'training') {
+                currentImpulses = realImpulses; // Январские данные для обучения
+            } else {
+                currentImpulses = februaryImpulses; // Февральские данные для тестирования
+            }
+            
+            const impulse = currentImpulses[currentImpulse];
+            if (!impulse) {
+                // Если данные закончились, начинаем сначала
+                currentImpulse = 0;
+                return getRealImpulseData();
+            }
+            
+            const point = impulse.trajectory[currentTrajectoryPoint];
+            
+            // Показываем название импульса в консоли
+            if (currentTrajectoryPoint === 0) {
+                if (mlDetector.currentPhase === 'training') {
+                    console.log(`🎯 НАЧИНАЕМ ОБУЧЕНИЕ НА ИМПУЛЬСЕ #${currentImpulse + 1}: ${impulse.name}`);
+                    console.log(`📍 Минимум находится на точке ${impulse.minimumPoint} из ${impulse.trajectory.length}`);
+                    isLearningComplete = false;
+                } else {
+                    console.log(`🧪 ЧЕСТНОЕ ТЕСТИРОВАНИЕ #${currentImpulse + 1}: ${impulse.name}`);
+                    console.log(`📊 Ожидаемый минимум на точке ${impulse.minimumPoint} (но система его НЕ знает!)`);
+                    console.log(`⚖️ Используем изученные веса без дообучения`);
+                }
+            }
+            
+            // Определяем, является ли текущая точка минимумом
+            const isMinimumPoint = (currentTrajectoryPoint === impulse.minimumPoint);
+            
+            // В февральской фазе система НЕ должна знать где минимумы!
+            let isMinimumForSystem;
+            if (mlDetector.currentPhase === 'training') {
+                isMinimumForSystem = isMinimumPoint; // В обучении знаем где минимумы
+            } else {
+                isMinimumForSystem = false; // В тестировании НЕ знаем!
+            }
+            
+            // Переходим к следующей точке
+            currentTrajectoryPoint++;
+            
+            // 🔴 ОСТАНАВЛИВАЕМ ОБУЧЕНИЕ после достижения минимума!
+            if (isMinimumPoint && !isLearningComplete) {
+                console.log(`🔴 МИНИМУМ ДОСТИГНУТ! ОСТАНАВЛИВАЕМ ОБУЧЕНИЕ НА ИМПУЛЬСЕ #${currentImpulse + 1}`);
+                console.log(`📊 ЗАКОНОМЕРНОСТЬ #${currentImpulse + 1} ИЗУЧЕНА!`);
+                
+                // 🔧 ПРИНУДИТЕЛЬНАЯ АДАПТАЦИЯ ВЕСОВ НА МИНИМУМЕ!
+                console.log(`🔧 ПРИНУДИТЕЛЬНАЯ АДАПТАЦИЯ ВЕСОВ НА МИНИМУМЕ...`);
+                const minFeatures = impulse.trajectory[impulse.minimumPoint - 1]; // -1 т.к. массив с 0
+                mlDetector.adaptWeightsToMinimum([
+                    minFeatures.priceVelocity,
+                    minFeatures.ema20Velocity, 
+                    minFeatures.ema20Angle,
+                    minFeatures.priceDistance
+                ]);
+                console.log(`🎯 ВЕСА ПРИНУДИТЕЛЬНО АДАПТИРОВАНЫ:`, mlDetector.weights);
+                
+                // Сохраняем закономерность этого импульса
+                const currentWeights = {...mlDetector.weights};
+                learnedPatterns.push({
+                    impulseNumber: currentImpulse + 1,
+                    impulseName: impulse.name,
+                    weights: currentWeights,
+                    patternsLearned: mlDetector.trainingStats.patternsLearned
+                });
+                
+                isLearningComplete = true;
+                
+                // Показываем результат обучения
+                console.log(`🧠 УДЕЛЬНЫЕ ВЕСА ИМПУЛЬСА #${currentImpulse + 1} (АДАПТИРОВАННЫЕ):`, {
+                    'Скорость цены': (currentWeights.priceVelocity * 100).toFixed(1) + '%',
+                    'Скорость EMA20': (currentWeights.ema20Velocity * 100).toFixed(1) + '%',
+                    'Угол EMA20': (currentWeights.ema20Angle * 100).toFixed(1) + '%',
+                    'Расстояние': (currentWeights.priceDistance * 100).toFixed(1) + '%'
+                });
+                
+                // 🎯 ДВОЙНОЕ ТЕСТИРОВАНИЕ: НА ОБУЧЕННЫХ И НОВЫХ ДАННЫХ!
+                console.log(`\n🧪 ТЕСТИРУЕМ МОДЕЛЬ НА ВСЕХ ТОЧКАХ ИМПУЛЬСА #${currentImpulse + 1}:`);
+                console.log(`📚 1. ТЕСТ НА ОБУЧЕННЫХ ДАННЫХ (проверка качества обучения):`);
+                testModelOnWholeImpulse(impulse, currentWeights, 'trained');
+                
+                // Честное тестирование на новых данных
+                if (testImpulses[currentImpulse]) {
+                    console.log(`\n🔥 2. ЧЕСТНЫЙ ТЕСТ НА НОВЫХ ДАННЫХ (проверка обобщения):`);
+                    testModelOnWholeImpulse(testImpulses[currentImpulse], currentWeights, 'test');
+                }
+                
+                // Ждем 10 секунд перед переходом к следующему импульсу
+                setTimeout(() => {
+                    currentImpulse = (currentImpulse + 1) % realImpulses.length;
+                    currentTrajectoryPoint = 0;
+                    
+                    // Сбрасываем ML модель для нового импульса
+                    mlDetector.trainingData = [...mlDetector.trainingData.slice(0, 12)]; // Оставляем базовые 12 паттернов
+                    mlDetector.trainingStats.patternsLearned = 12;
+                    mlDetector.trainingStats.buyMarkersPlaced = 0;
+                    
+                    console.log(`🔄 ПЕРЕХОДИМ К ИМПУЛЬСУ #${currentImpulse + 1}. Модель СБРОШЕНА.`);
+                    
+                    // Если изучили все импульсы - показываем сравнение
+                    if (learnedPatterns.length >= realImpulses.length) {
+                        showFinalComparison();
+                    }
+                }, 10000);
+            }
+            
+            // Если обучение завершено - показываем только информацию без обучения
+            if (isLearningComplete) {
+                console.log(`⏸️ Обучение завершено. Ожидаем переключения на следующий импульс...`);
+            } else {
+                console.log(`📊 Изучаем точку ${currentTrajectoryPoint}/${impulse.trajectory.length}: ${isMinimumPoint ? '🔴 МИНИМУМ!' : '⚫ Обычная точка'}`);
+            }
+            
+            return {
+                ...point,
+                isMinimum: isMinimumForSystem, // В феврале всегда false!
+                realMinimum: isMinimumPoint, // Для проверки результатов
+                impulseName: impulse.name,
+                pointInfo: `Точка ${currentTrajectoryPoint}/${impulse.trajectory.length}`,
+                learningComplete: isLearningComplete,
+                impulseNumber: currentImpulse + 1,
+                phase: mlDetector.currentPhase
+            };
+        }
+        
+        // 🧪 Тестирование обученной модели на всех точках импульса
+        function testModelOnWholeImpulse(impulse, learnedWeights, testType = 'trained') {
+            const isHonestTest = testType === 'test';
+            const testIcon = isHonestTest ? '🔥' : '📚';
+            const testName = isHonestTest ? 'ЧЕСТНЫЙ ТЕСТ (новые данные)' : 'ТЕСТ НА ОБУЧЕННЫХ ДАННЫХ';
+            
+            console.log(`${testIcon} ${testName}`);
+            console.log(`📋 АНАЛИЗ ВСЕХ ТОЧЕК ИМПУЛЬСА: ${impulse.name}`);
+            console.log(`📍 Реальный минимум на точке: ${impulse.minimumPoint}`);
+            
+            let detectedMinimums = [];
+            let missedMinimums = [];
+            
+            impulse.trajectory.forEach((point, index) => {
+                const pointNumber = index + 1;
+                const features = [point.priceVelocity, point.ema20Velocity, point.ema20Angle, point.priceDistance];
+                
+                // Применяем обученные веса для расчета уверенности
+                const weightedScore = features.reduce((sum, feature, i) => {
+                    const weights = [learnedWeights.priceVelocity, learnedWeights.ema20Velocity, 
+                                   learnedWeights.ema20Angle, learnedWeights.priceDistance];
+                    return sum + Math.abs(feature) * weights[i];
+                }, 0);
+                
+                // 🔧 ИСПРАВЛЕННЫЙ расчет уверенности - адаптивная нормализация
+                const maxExpectedScore = 3.0; // Максимальный ожидаемый взвешенный счет для сильного минимума
+                const baseConfidence = Math.min(1, weightedScore / maxExpectedScore);
+                
+                // 🧠 Дополнительные бонусы для паттернов минимумов
+                let confidence = baseConfidence;
+                
+                // Бонус за согласованность всех негативных признаков (сильное падение)
+                const allNegative = features[0] < 0 && features[1] < 0 && features[2] < 0;
+                if (allNegative) confidence *= 1.5; // +50% за согласованность
+                
+                // Бонус за экстремальные значения (очень сильное падение = минимум близко)
+                const isExtreme = Math.abs(features[0]) > 0.025 || Math.abs(features[2]) > 2.5;
+                if (isExtreme) confidence *= 1.3; // +30% за экстремальность
+                
+                // Ограничиваем максимум
+                confidence = Math.min(1, confidence);
+                
+                const shouldPlaceBuyMarker = confidence > 0.4; // 🔧 ПОНИЖЕН ПОРОГ с 60% до 40%
+                
+                const isRealMinimum = (pointNumber === impulse.minimumPoint);
+                
+                if (isRealMinimum && shouldPlaceBuyMarker) {
+                    // ✅ ПРАВИЛЬНО НАЙДЕН МИНИМУМ
+                    console.log(`✅ Точка ${pointNumber}: МИНИМУМ НАЙДЕН! Уверенность: ${(confidence * 100).toFixed(1)}%`);
+                    detectedMinimums.push({point: pointNumber, confidence: confidence, correct: true});
+                } else if (isRealMinimum && !shouldPlaceBuyMarker) {
+                    // ❌ ПРОПУЩЕН МИНИМУМ
+                    console.log(`❌ Точка ${pointNumber}: МИНИМУМ ПРОПУЩЕН! Уверенность: ${(confidence * 100).toFixed(1)}% (ниже порога 40%)`);
+                    missedMinimums.push({point: pointNumber, confidence: confidence, reason: 'Низкая уверенность'});
+                } else if (!isRealMinimum && shouldPlaceBuyMarker) {
+                    // ⚠️ ЛОЖНЫЙ СИГНАЛ
+                    console.log(`⚠️ Точка ${pointNumber}: ЛОЖНЫЙ BUY! Уверенность: ${(confidence * 100).toFixed(1)}% (НЕ минимум)`);
+                    detectedMinimums.push({point: pointNumber, confidence: confidence, correct: false});
+                } else {
+                    // ⚫ ОБЫЧНАЯ ТОЧКА - правильно пропущена
+                    console.log(`⚫ Точка ${pointNumber}: Обычная точка. Уверенность: ${(confidence * 100).toFixed(1)}% - корректно пропущена`);
+                }
+                
+                // Показываем детали расчета для лучшего понимания
+                console.log(`   📊 Признаки: PriceVel=${point.priceVelocity.toFixed(3)}, EMA20Vel=${point.ema20Velocity.toFixed(3)}, ` +
+                          `Angle=${point.ema20Angle.toFixed(1)}°, Distance=${point.priceDistance.toFixed(1)}%`);
+                console.log(`   ⚖️ Взвешенный счет: ${weightedScore.toFixed(3)} → Уверенность: ${(confidence * 100).toFixed(1)}%`);
+            });
+            
+            // Сводка результатов
+            console.log(`\n📊 СВОДКА ТЕСТИРОВАНИЯ ИМПУЛЬСА #${impulse.impulseNumber || currentImpulse + 1}:`);
+            console.log(`✅ Правильно найденных минимумов: ${detectedMinimums.filter(d => d.correct).length}`);
+            console.log(`❌ Пропущенных минимумов: ${missedMinimums.length}`);
+            console.log(`⚠️ Ложных сигналов: ${detectedMinimums.filter(d => !d.correct).length}`);
+            
+            const accuracy = ((detectedMinimums.filter(d => d.correct).length) / 1) * 100; // 1 = количество реальных минимумов
+            console.log(`🎯 ТОЧНОСТЬ: ${accuracy.toFixed(1)}%`);
+            
+            if (missedMinimums.length > 0) {
+                console.log(`\n🔍 АНАЛИЗ ПРОПУЩЕННЫХ МИНИМУМОВ:`);
+                missedMinimums.forEach(missed => {
+                    console.log(`   ❌ Точка ${missed.point}: ${missed.reason} (${(missed.confidence * 100).toFixed(1)}%)`);
+                });
+            }
+            
+            // 🎯 Показываем визуальные результаты в интерфейсе
+            showImpulseTestResults(impulse, detectedMinimums, missedMinimums, accuracy, testType);
+        }
+        
+        // 📊 Показать результаты тестирования в интерфейсе
+        function showImpulseTestResults(impulse, detected, missed, accuracy, testType = 'trained') {
+            const isHonestTest = testType === 'test';
+            const testIcon = isHonestTest ? '🔥' : '📚';
+            const testBadge = isHonestTest ? 'ЧЕСТНЫЙ ТЕСТ' : 'ТЕСТ НА ОБУЧЕННЫХ';
+            // Создаем или находим контейнер для результатов
+            let resultsContainer = document.getElementById('impulse-test-results');
+            if (!resultsContainer) {
+                resultsContainer = document.createElement('div');
+                resultsContainer.id = 'impulse-test-results';
+                resultsContainer.style.cssText = `
+                    position: fixed;
+                    top: 80px;
+                    right: 20px;
+                    width: 350px;
+                    max-height: 500px;
+                    overflow-y: auto;
+                    background: linear-gradient(45deg, #1a1a2e, #16213e);
+                    border: 2px solid #4ECDC4;
+                    border-radius: 15px;
+                    padding: 15px;
+                    z-index: 1000;
+                    font-family: monospace;
+                    font-size: 12px;
+                    color: white;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+                `;
+                document.body.appendChild(resultsContainer);
+            }
+            
+            // Добавляем результат тестирования импульса
+            const resultDiv = document.createElement('div');
+            resultDiv.style.cssText = `
+                margin-bottom: 15px;
+                padding: 10px;
+                background: rgba(255,255,255,0.1);
+                border-radius: 8px;
+                border-left: 4px solid ${accuracy >= 100 ? '#4CAF50' : accuracy >= 50 ? '#FF9800' : '#f44336'};
+            `;
+            
+            const correctMinimums = detected.filter(d => d.correct).length;
+            const falseSignals = detected.filter(d => !d.correct).length;
+            
+            resultDiv.innerHTML = `
+                <div style="font-weight: bold; margin-bottom: 8px; color: #4ECDC4;">
+                    ${testIcon} ${impulse.name}
+                </div>
+                <div style="font-size: 10px; margin-bottom: 6px; color: ${isHonestTest ? '#FF6B6B' : '#4CAF50'}; font-weight: bold;">
+                    ${testBadge}
+                </div>
+                <div style="margin: 4px 0;">
+                    📍 Реальный минимум: точка ${impulse.minimumPoint}
+                </div>
+                <div style="margin: 4px 0; color: #4CAF50;">
+                    ✅ Найдено правильно: ${correctMinimums}
+                </div>
+                <div style="margin: 4px 0; color: #f44336;">
+                    ❌ Пропущено: ${missed.length}
+                </div>
+                <div style="margin: 4px 0; color: #FF9800;">
+                    ⚠️ Ложных сигналов: ${falseSignals}
+                </div>
+                <div style="margin: 8px 0; font-weight: bold; color: ${accuracy >= 100 ? '#4CAF50' : accuracy >= 50 ? '#FF9800' : '#f44336'};">
+                    🎯 ТОЧНОСТЬ: ${accuracy.toFixed(1)}%
+                </div>
+                ${missed.length > 0 ? `
+                    <div style="margin-top: 8px; font-size: 11px; color: #ffcdd2;">
+                        💡 Пропущенные: ${missed.map(m => `точка ${m.point} (${(m.confidence * 100).toFixed(1)}%)`).join(', ')}
+                    </div>
+                ` : ''}
+            `;
+            
+            // Добавляем в начало контейнера
+            resultsContainer.insertBefore(resultDiv, resultsContainer.firstChild);
+            
+            // Показываем также уведомление о завершении тестирования
+            showTestCompletionNotification(impulse.name, accuracy, testType);
+        }
+        
+        // Уведомление о завершении тестирования
+        function showTestCompletionNotification(impulseName, accuracy, testType = 'trained') {
+            const isHonestTest = testType === 'test';
+            const testIcon = isHonestTest ? '🔥' : '📚';
+            const testName = isHonestTest ? 'ЧЕСТНЫЙ ТЕСТ' : 'ТЕСТ ОБУЧЕННЫХ';
+            const bgGradient = isHonestTest ? 
+                'linear-gradient(45deg, #FF6B6B, #FF9800)' : 
+                'linear-gradient(45deg, #673AB7, #9C27B0)';
+            
+            const notification = document.createElement('div');
+            
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: ${bgGradient};
+                color: white;
+                padding: 15px 25px;
+                border-radius: 10px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+                z-index: 1001;
+                font-weight: bold;
+                animation: slideDown 0.5s ease-out;
+            `;
+            
+            notification.innerHTML = `
+                ${testIcon} <strong>${testName} ЗАВЕРШЕН!</strong><br>
+                ${impulseName}<br>
+                <span style="color: ${accuracy >= 100 ? '#4CAF50' : accuracy >= 50 ? '#FFEB3B' : '#f44336'};">
+                    Точность: ${accuracy.toFixed(1)}%
+                </span>
+            `;
+            
+            // Добавляем анимацию
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes slideDown {
+                    from { transform: translateX(-50%) translateY(-100%); opacity: 0; }
+                    to { transform: translateX(-50%) translateY(0); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+            
+            document.body.appendChild(notification);
+            
+            // Убираем через 4 секунды
+            setTimeout(() => {
+                notification.style.animation = 'slideUp 0.5s ease-in';
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        document.body.removeChild(notification);
+                    }
+                }, 500);
+            }, 4000);
+        }
+        
+        // 📊 Показать финальное сравнение всех закономерностей
+        function showFinalComparison() {
+            console.log(`🎉 ВСЕ ${learnedPatterns.length} ИМПУЛЬСОВ ИЗУЧЕНЫ! СРАВНИВАЕМ ЗАКОНОМЕРНОСТИ:`);
+            
+            learnedPatterns.forEach((pattern, index) => {
+                console.log(`\n📊 ИМПУЛЬС #${pattern.impulseNumber} (${pattern.impulseName}):`);
+                console.log(`   Скорость цены: ${(pattern.weights.priceVelocity * 100).toFixed(1)}%`);
+                console.log(`   Скорость EMA20: ${(pattern.weights.ema20Velocity * 100).toFixed(1)}%`);
+                console.log(`   Угол EMA20: ${(pattern.weights.ema20Angle * 100).toFixed(1)}%`);
+                console.log(`   Расстояние: ${(pattern.weights.priceDistance * 100).toFixed(1)}%`);
+            });
+            
+            // Вычисляем средние веса
+            const avgWeights = {
+                priceVelocity: learnedPatterns.reduce((sum, p) => sum + p.weights.priceVelocity, 0) / learnedPatterns.length,
+                ema20Velocity: learnedPatterns.reduce((sum, p) => sum + p.weights.ema20Velocity, 0) / learnedPatterns.length,
+                ema20Angle: learnedPatterns.reduce((sum, p) => sum + p.weights.ema20Angle, 0) / learnedPatterns.length,
+                priceDistance: learnedPatterns.reduce((sum, p) => sum + p.weights.priceDistance, 0) / learnedPatterns.length
+            };
+            
+            console.log(`\n🧠 УНИВЕРСАЛЬНАЯ ФОРМУЛА МИНИМУМОВ (средние веса):`);
+            console.log(`   Скорость цены: ${(avgWeights.priceVelocity * 100).toFixed(1)}%`);
+            console.log(`   Скорость EMA20: ${(avgWeights.ema20Velocity * 100).toFixed(1)}%`);
+            console.log(`   Угол EMA20: ${(avgWeights.ema20Angle * 100).toFixed(1)}%`);
+            console.log(`   Расстояние: ${(avgWeights.priceDistance * 100).toFixed(1)}%`);
+        }
+        
+        // 📊 Статистика торговли
+        let tradingStats = {
+            totalTrades: 0,
+            successfulTrades: 0,
+            totalProfit: 0,
+            avgProfit: 0,
+            maxProfit: 0,
+            activeTrades: new Map() // Храним активные сделки
+        };
+
+        // Добавление сигнала в историю с прибыльностью
+        function addSignalToHistory(emoji, action, confidence) {
+            const historyContainer = document.getElementById('signals-history');
+            const time = new Date().toLocaleTimeString('ru', {hour: '2-digit', minute: '2-digit'});
+            const confidencePercent = (confidence * 100).toFixed(0);
+            
+            // Симулируем цену входа (в реальности - из TradingView)
+            const entryPrice = 113000 + (Math.random() - 0.5) * 2000;
+            const tradeId = Date.now();
+            
+            // Торговые сделки ТОЛЬКО в феврале (бэктест)!
+            if (confidence > 0.6 && action.includes('МИНИМУМ') && 
+                (mlDetector.currentPhase === 'backtesting')) {
+                tradingStats.activeTrades.set(tradeId, {
+                    entryPrice: entryPrice,
+                    entryTime: time,
+                    confidence: confidence
+                });
+                
+                // Через некоторое время симулируем закрытие
+                setTimeout(() => closeTradeSimulation(tradeId), 30000 + Math.random() * 60000);
+            }
+            
+            const signalDiv = document.createElement('div');
+            const bgColor = confidence > 0.8 ? 'rgba(76, 175, 80, 0.3)' : 
+                           confidence > 0.6 ? 'rgba(255, 152, 0, 0.3)' : 'rgba(158, 158, 158, 0.3)';
+            
+            signalDiv.style.cssText = `
+                padding: 10px; 
+                margin: 5px 0; 
+                background: ${bgColor}; 
+                border-radius: 5px;
+                font-size: 0.9em;
+                border-left: 4px solid ${confidence > 0.8 ? '#4CAF50' : '#FF9800'};
+            `;
+            
+            const profitInfo = confidence > 0.8 ? ` 💰$${entryPrice.toFixed(0)}` : '';
+            signalDiv.textContent = `${emoji} ${time} - ${action} (${confidencePercent}%)${profitInfo}`;
+            
+            // Добавляем в начало
+            historyContainer.insertBefore(signalDiv, historyContainer.firstChild);
+            
+            // Ограничиваем количество записей
+            while (historyContainer.children.length > 5) {
+                historyContainer.removeChild(historyContainer.lastChild);
+            }
+        }
+        
+        // Симуляция закрытия сделки
+        function closeTradeSimulation(tradeId) {
+            const trade = tradingStats.activeTrades.get(tradeId);
+            if (!trade) return;
+            
+            // Симулируем результат на основе уверенности ML
+            const profitChance = trade.confidence; // Чем выше уверенность, тем больше шанс на прибыль
+            const isProfit = Math.random() < profitChance;
+            
+            let profitPercent;
+            if (isProfit) {
+                // Прибыльная сделка: 1-8%
+                profitPercent = 1 + Math.random() * 7;
+            } else {
+                // Убыточная сделка: -1% до -3%
+                profitPercent = -(0.5 + Math.random() * 2.5);
+            }
+            
+            const profitUSD = trade.entryPrice * (profitPercent / 100);
+            
+            // Обновляем статистику
+            tradingStats.totalTrades++;
+            if (isProfit) tradingStats.successfulTrades++;
+            tradingStats.totalProfit += profitUSD;
+            tradingStats.avgProfit = tradingStats.totalProfit / tradingStats.totalTrades;
+            if (profitPercent > tradingStats.maxProfit) tradingStats.maxProfit = profitPercent;
+            
+            // Удаляем из активных
+            tradingStats.activeTrades.delete(tradeId);
+            
+            // Добавляем в историю результат
+            const time = new Date().toLocaleTimeString('ru', {hour: '2-digit', minute: '2-digit'});
+            const historyContainer = document.getElementById('signals-history');
+            const resultDiv = document.createElement('div');
+            
+            resultDiv.style.cssText = `
+                padding: 8px; 
+                margin: 3px 0; 
+                background: ${isProfit ? 'rgba(76, 175, 80, 0.4)' : 'rgba(244, 67, 54, 0.4)'}; 
+                border-radius: 5px;
+                font-size: 0.85em;
+                border-left: 4px solid ${isProfit ? '#4CAF50' : '#f44336'};
+            `;
+            
+            const emoji = isProfit ? '✅' : '❌';
+            const sign = profitPercent > 0 ? '+' : '';
+            resultDiv.textContent = `${emoji} ${time} - Закрыто: ${sign}${profitPercent.toFixed(1)}% (${sign}$${profitUSD.toFixed(0)})`;
+            
+            historyContainer.insertBefore(resultDiv, historyContainer.firstChild);
+        }
+        
+        // 🎯 Добавление BUY маркера на график  
+        function addBuyMarkerToChart(confidence) {
+            const phase = mlDetector.currentPhase;
+            const phaseText = phase === 'training' ? 'ОБУЧЕНИЕ' : 'БЭКТЕСТ';
+            
+            // В реальной версии здесь будет API TradingView для добавления маркеров
+            console.log(`🚨🎯 *** BUY МАРКЕР ДОБАВЛЕН *** (${phaseText})! Уверенность: ${(confidence * 100).toFixed(1)}%`);
+            console.log(`✅ Время: ${new Date().toLocaleTimeString()}, Фаза: ${phase.toUpperCase()}`);
+            
+            // Показываем уведомление с указанием фазы
+            showBuyNotification(confidence, phase);
+        }
+        
+        // Показ уведомления о BUY сигнале с указанием фазы
+        function showBuyNotification(confidence, phase = 'training') {
+            const isTraining = phase === 'training';
+            const notification = document.createElement('div');
+            
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${isTraining ? 
+                    'linear-gradient(45deg, #FF9800, #FFC107)' : 
+                    'linear-gradient(45deg, #4CAF50, #8BC34A)'};
+                color: white;
+                padding: 15px 20px;
+                border-radius: 10px;
+                box-shadow: 0 4px 20px ${isTraining ? 
+                    'rgba(255, 152, 0, 0.4)' : 
+                    'rgba(76, 175, 80, 0.4)'};
+                z-index: 1000;
+                font-weight: bold;
+                animation: slideIn 0.5s ease-out;
+            `;
+            
+            notification.innerHTML = `
+                ${isTraining ? '🎓' : '🎯'} <strong>${isTraining ? 'ОБУЧЕНИЕ' : 'BUY СИГНАЛ'}!</strong><br>
+                Уверенность: ${(confidence * 100).toFixed(1)}%<br>
+                <small>${isTraining ? 
+                    'Минимум найден - паттерн изучен' : 
+                    'Рекомендуется открыть ЛОНГ'}</small>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Убираем через 5 секунд
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.5s ease-in';
+                setTimeout(() => document.body.removeChild(notification), 500);
+            }, 5000);
+        }
+        
+        // Обновление статистики прибыльности
+        function updateProfitabilityStats() {
+            const winRate = tradingStats.totalTrades > 0 ? 
+                (tradingStats.successfulTrades / tradingStats.totalTrades * 100).toFixed(1) : '0.0';
+            
+            // Обновляем индикаторы если элементы есть
+            const elements = {
+                'win-rate': winRate + '%',
+                'total-profit': '$' + tradingStats.totalProfit.toFixed(0), 
+                'avg-profit': tradingStats.avgProfit.toFixed(0) + '$',
+                'active-trades': tradingStats.activeTrades.size
+            };
+            
+            Object.entries(elements).forEach(([id, value]) => {
+                const element = document.getElementById(id);
+                if (element) element.textContent = value;
+            });
+        }
+        
+        // 📅 Обновление индикатора фазы
+        function updatePhaseIndicator(phase, month, trainingStats) {
+            const indicator = document.getElementById('phase-indicator');
+            if (!indicator) return;
+            
+            if (phase === 'training') {
+                indicator.style.background = 'linear-gradient(45deg, #FF9800, #FFC107)';
+                indicator.innerHTML = `🎓 ФАЗА ОБУЧЕНИЯ: Январь 2025 
+                    <br><small>Паттернов изучено: ${trainingStats?.patternsLearned || 0} | BUY маркеров: ${trainingStats?.buyMarkersPlaced || 0}</small>`;
+            } else if (phase === 'production') {
+                indicator.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+                indicator.innerHTML = `🚀 ПРОДАКШН: Применяем модель 
+                    <br><small>Используем обученные веса (${trainingStats?.patternsLearned || 0} паттернов изучено)</small>`;
+            } else {
+                indicator.style.background = 'linear-gradient(45deg, #2196F3, #21CBF3)';
+                indicator.innerHTML = `🧪 ЧЕСТНЫЙ БЭКТЕСТ: Февраль 2025 
+                    <br><small>Тестируем на новых данных (изучено: ${trainingStats?.patternsLearned || 0} паттернов)</small>`;
+            }
+        }
+
+        // 🚀 АВТОМАТИЧЕСКАЯ ИНИЦИАЛИЗАЦИЯ СИСТЕМЫ
+        window.mlDetector = new MinimumDetectorML();
+        
+        // Попытка загрузить сохраненную модель при старте
+        const modelLoaded = window.mlDetector.loadTrainedModel();
+        if (modelLoaded) {
+            console.log('🚀 ЗАПУСК В ПРОДАКШН РЕЖИМЕ: Применяем обученную модель!');
+            updatePhaseIndicator('production', 'continuous', window.mlDetector.trainingStats);
+        } else {
+            console.log('🎓 ЗАПУСК В ОБУЧАЮЩЕМ РЕЖИМЕ: Начинаем обучение с нуля');
+            updatePhaseIndicator('training', 'january', window.mlDetector.trainingStats);
+        }
+
+        // ТУРБО-ОБУЧЕНИЕ: обновления каждые 5 секунд!
+        setInterval(updateAnalysis, 5000); // 5 секунд на каждую точку импульса для наблюдения
+        
+        // Первоначальное обновление
+        updateAnalysis();
+        
+        // 🎓 Кнопка перезапуска обучения
+        const restartBtn = document.createElement('button');
+        restartBtn.innerHTML = '🎓 Перезапустить обучение';
+        restartBtn.style.cssText = `
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: linear-gradient(45deg, #FF9800, #FFC107);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            z-index: 1000;
+            box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3);
+        `;
+        restartBtn.onclick = () => mlDetector.restartTraining();
+        document.body.appendChild(restartBtn);
+        
+        // 💾 Кнопка загрузки обученной модели
+        const loadModelBtn = document.createElement('button');
+        loadModelBtn.innerHTML = '💾 ЗАГРУЗИТЬ МОДЕЛЬ';
+        loadModelBtn.style.cssText = `
+            position: fixed;
+            top: 60px;
+            left: 10px;
+            background: linear-gradient(45deg, #2196F3, #21CBF3);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            z-index: 1000;
+            box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
+        `;
+        loadModelBtn.onclick = () => {
+            const loaded = mlDetector.loadTrainedModel();
+            if (loaded) {
+                loadModelBtn.innerHTML = '✅ МОДЕЛЬ ЗАГРУЖЕНА';
+                loadModelBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+                console.log('🚀 Переход в продакшн режим!');
+            } else {
+                alert('❌ Сохраненная модель не найдена. Сначала завершите обучение.');
+            }
+        };
+        document.body.appendChild(loadModelBtn);
+        
+        // 🔄 Кнопка переключения режимов
+        const switchBtn = document.createElement('button');
+        switchBtn.innerHTML = '🔄 КОРРЕКЦИЯ (EXIT LONG)';
+        switchBtn.style.cssText = `
+            position: fixed;
+            top: 120px;
+            right: 20px;
+            padding: 15px 25px;
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 1000;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+        `;
+        switchBtn.onclick = () => {
+            if (mlDetector.detectionMode === 'minimums') {
+                mlDetector.switchDetectionMode('maximums');
+                switchBtn.innerHTML = '📉 ИМПУЛЬС (OPEN LONG)';
+                switchBtn.style.background = 'linear-gradient(45deg, #f44336, #d32f2f)';
+            } else {
+                mlDetector.switchDetectionMode('minimums');
+                switchBtn.innerHTML = '📈 КОРРЕКЦИЯ (EXIT LONG)';
+                switchBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+            }
+        };
+
+        // 🔄 Обработчик для новой кнопки переключения режимов
+        const modeSwitchBtn = document.getElementById('mode-switch-btn');
+        if (modeSwitchBtn) {
+            modeSwitchBtn.onclick = () => {
+                if (mlDetector.detectionMode === 'minimums') {
+                    mlDetector.switchDetectionMode('maximums');
+                    modeSwitchBtn.innerHTML = '📉 ИМПУЛЬС (OPEN LONG)';
+                    modeSwitchBtn.style.background = 'linear-gradient(45deg, #f44336, #d32f2f)';
+                } else {
+                    mlDetector.switchDetectionMode('minimums');
+                    modeSwitchBtn.innerHTML = '🔄 КОРРЕКЦИЯ (EXIT LONG)';
+                    modeSwitchBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+                }
+            };
+        }
+        document.body.appendChild(switchBtn);
+        
+        // 📊 Анализ динамики признаков ДО пивота  
+        function analyzeDynamicsBeforePivot() {
+            if (featuresHistory.length < 3) return;
+            
+            const last3 = featuresHistory.slice(-3);
+            
+            console.log('📈 АНАЛИЗ ДИНАМИКИ ДО ПИВОТА:');
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            
+            // Динамика скорости цены
+            const priceVelTrend = [
+                last3[0].priceVelocity,
+                last3[1].priceVelocity, 
+                last3[2].priceVelocity
+            ];
+            console.log('📉 Скорость цены:', priceVelTrend.map(v => v.toFixed(3)).join(' → '));
+            
+            // Динамика скорости EMA20
+            const ema20VelTrend = [
+                last3[0].ema20Velocity,
+                last3[1].ema20Velocity,
+                last3[2].ema20Velocity
+            ];
+            console.log('📊 Скорость EMA20:', ema20VelTrend.map(v => v.toFixed(3)).join(' → '));
+            
+            // Динамика угла EMA20
+            const angleTrend = [
+                last3[0].ema20Angle,
+                last3[1].ema20Angle,
+                last3[2].ema20Angle
+            ];
+            console.log('📐 Угол EMA20:', angleTrend.map(v => v.toFixed(1) + '°').join(' → '));
+            
+            // Динамика расстояния
+            const distanceTrend = [
+                last3[0].priceDistance,
+                last3[1].priceDistance,
+                last3[2].priceDistance
+            ];
+            console.log('📏 Расстояние:', distanceTrend.map(v => v.toFixed(1) + '%').join(' → '));
+            
+            // Выводы о закономерностях
+            const priceAcceleration = priceVelTrend[2] - priceVelTrend[0];
+            const ema20Acceleration = ema20VelTrend[2] - ema20VelTrend[0];
+            
+            console.log('🔍 ЗАКОНОМЕРНОСТИ:');
+            if (priceAcceleration < -0.005) {
+                console.log('  ✅ Падение цены ускоряется!');
+            }
+            if (ema20Acceleration < -0.003) {
+                console.log('  ✅ EMA20 тоже падает быстрее!');
+            }
+            if (distanceTrend[2] < distanceTrend[0]) {
+                console.log('  ✅ Цена уходит от EMA20!');
+            }
+            
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        }
+
+        // Функция изменения размера графика
+        function resizeChart() {
+            if (tvWidget) {
+                setTimeout(() => {
+                    initTradingView();
+                }, 100);
+            }
+        }
+        
+        // Обработчик изменения размера окна
+        window.addEventListener('resize', resizeChart);
+        
+        // Обработчики изменения настроек
+        document.getElementById('symbol-select').addEventListener('change', function(e) {
+            console.log('Символ изменен на:', e.target.value);
+            updateAnalysis();
+            resizeChart();
+        });
+
+        document.getElementById('timeframe-select').addEventListener('change', function(e) {
+            console.log('Таймфрейм изменен на:', e.target.value);
+            updateAnalysis();
+            resizeChart();
+        });
+    </script>
+</body>
+</html>

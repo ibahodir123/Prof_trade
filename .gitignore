@@ -130,7 +130,7 @@ dmypy.json
 
 # Machine Learning specific
 *.h5
-*.pkl
+# *.pkl  # Закомментировано для загрузки моделей
 *.joblib
 *.model
 *.weights
@@ -138,7 +138,6 @@ dmypy.json
 *.pb
 *.tflite
 *.onnx
-
 # Data files
 *.csv
 *.json

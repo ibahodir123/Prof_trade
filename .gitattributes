@@ -1,0 +1,25 @@
+# Файлы с Unix окончаниями строк (LF)
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.txt text eol=lf
+
+# Бинарные файлы
+*.pkl binary
+*.model binary
+*.h5 binary
+*.jpg binary
+*.png binary
+*.zip binary
+*.tar.gz binary
+
+# Файлы, которые должны оставаться как есть
+.gitignore text eol=lf
+README* text eol=lf
+LICENSE* text eol=lf

@@ -1,0 +1,107 @@
+name: 🚀 Deploy Trading Bot to Vultr
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 🔄 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔑 Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+    - name: 📤 Deploy to server
+      run: |
+        echo "🚀 Начинаем развертывание на сервер ${{ secrets.SERVER_IP }}..."
+
+        # Создание директории проекта
+        ssh -i ~/.ssh/id_rsa root@${{ secrets.SERVER_IP }} "mkdir -p /root/trading-bot"
+
+        # Загрузка файлов (исключая ненужные)
+        rsync -avz --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
+              --exclude='*.log' --exclude='data_batch_*.json' \
+              --exclude='movements_database.json' --exclude='patterns_database.json' \
+              ./ root@${{ secrets.SERVER_IP }}:/root/trading-bot/
+
+        echo "✅ Файлы загружены"
+
+    - name: 🛠️ Setup server environment
+      run: |
+        ssh -i ~/.ssh/id_rsa root@${{ secrets.SERVER_IP }} << 'EOF'
+          cd /root/trading-bot
+
+          # Обновление системы
+          apt update && apt upgrade -y
+
+          # Установка зависимостей
+          apt install -y python3 python3-pip python3-venv curl wget git ufw
+
+          # Создание виртуального окружения
+          python3 -m venv trading_env
+          source trading_env/bin/activate
+
+          # Установка Python зависимостей
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements_web.txt
+
+          # Настройка firewall
+          ufw allow 5000
+          ufw allow ssh
+          ufw --force enable
+
+          # Остановка старого сервиса если запущен
+          systemctl stop trading-bot 2>/dev/null || true
+
+          # Установка systemd сервиса
+          cp trading-bot.service /etc/systemd/system/
+          systemctl daemon-reload
+
+          # Включение автозапуска
+          systemctl enable trading-bot
+
+          echo "✅ Сервер настроен"
+        EOF
+
+    - name: 🚀 Start application
+      run: |
+        ssh -i ~/.ssh/id_rsa root@${{ secrets.SERVER_IP }} << 'EOF'
+          cd /root/trading-bot
+
+          # Запуск сервиса
+          systemctl start trading-bot
+
+          # Ожидание запуска
+          sleep 10
+
+          # Проверка статуса
+          systemctl status trading-bot --no-pager
+
+          # Проверка доступности
+          curl -f http://localhost:5000 || echo "❌ Сервер недоступен"
+
+          echo "🎉 Развертывание завершено!"
+          echo "🌐 Доступно на: http://${{ secrets.SERVER_IP }}:5000"
+        EOF
+
+    - name: 📊 Check deployment status
+      run: |
+        echo "🔍 Проверка статуса развертывания..."
+        ssh -i ~/.ssh/id_rsa root@${{ secrets.SERVER_IP }} "systemctl status trading-bot --no-pager"
+        echo "✅ Проверка завершена"
+
+    - name: 🔔 Notify deployment success
+      if: success()
+      run: |
+        echo "🎉 Развертывание успешно завершено!"
+        echo "🌐 Ваш торговый бот доступен на: http://${{ secrets.SERVER_IP }}:5000"

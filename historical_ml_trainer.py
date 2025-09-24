@@ -400,3 +400,4 @@ if __name__ == "__main__":
     print("\n✅ ГОТОВО! Теперь можно запустить historical_backtest.py")
 
 
+

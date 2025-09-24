@@ -317,3 +317,4 @@ if __name__ == "__main__":
         print("❌ Сначала запустите simple_min_detector.py для сбора данных!")
 
 
+

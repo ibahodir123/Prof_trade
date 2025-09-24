@@ -318,3 +318,4 @@ if __name__ == "__main__":
     detector.collect_minimums(start_date, end_date)
 
 
+

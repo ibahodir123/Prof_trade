@@ -269,3 +269,4 @@ if __name__ == "__main__":
     trainer = RealDataTrainer()
     trainer.test_multiple_symbols()
 
+

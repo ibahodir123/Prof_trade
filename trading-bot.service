@@ -1,0 +1,23 @@
+[Unit]
+Description=Trading Bot Web Dashboard
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trading-bot
+Environment=PATH=/root/trading-bot/trading_env/bin
+ExecStart=/root/trading-bot/trading_env/bin/python /root/trading-bot/web_trading_dashboard.py --host 0.0.0.0 --port 5000
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Ограничения ресурсов
+MemoryLimit=512M
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

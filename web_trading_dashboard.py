@@ -95,7 +95,11 @@ class WebTradingDashboard:
         def market_data():
             """Данные рынка"""
             try:
-                exchange = ccxt.binance()
+                config = load_config()
+		exchange = ccxt.binance({
+    			'apiKey': config['binance_api']['RZ0eHGS8snfTOhcMNiqyDauYfO3cOP6n98M0JYQwBmF9uxlzhgkvhd0af2KMgWnt'],
+    			'secret': config['binance_api']['vLl2nXCANtF3bHlzupcYHx17005b9QpOK13JbhhLKKFf9WqUMaPFhaUucEjxrQ2P']
+		})
                 symbol = request.args.get('symbol', 'BTC/USDT')
                 timeframe = request.args.get('timeframe', '1h')
                 limit = int(request.args.get('limit', 100))
@@ -127,7 +131,11 @@ class WebTradingDashboard:
             """Текущие сигналы"""
             try:
                 # Получение реальных данных с Binance
-                exchange = ccxt.binance()
+                config = load_config()
+		exchange = ccxt.binance({
+    			'apiKey': config['binance_api']['RZ0eHGS8snfTOhcMNiqyDauYfO3cOP6n98M0JYQwBmF9uxlzhgkvhd0af2KMgWnt'],
+    			'secret': config['binance_api']['vLl2nXCANtF3bHlzupcYHx17005b9QpOK13JbhhLKKFf9WqUMaPFhaUucEjxrQ2P']
+		})
 
                 # Анализ нескольких символов
                 symbols = ['BTC/USDT', 'ETH/USDT', 'ADA/USDT', 'XRP/USDT', 'SOL/USDT', 'BNB/USDT']
@@ -189,7 +197,11 @@ class WebTradingDashboard:
             """Статистика торговли"""
             try:
                 # Получение реальных данных с Binance
-                exchange = ccxt.binance()
+                config = load_config()
+		exchange = ccxt.binance({
+    			'apiKey': config['binance_api']['RZ0eHGS8snfTOhcMNiqyDauYfO3cOP6n98M0JYQwBmF9uxlzhgkvhd0af2KMgWnt'],
+    			'secret': config['binance_api']['vLl2nXCANtF3bHlzupcYHx17005b9QpOK13JbhhLKKFf9WqUMaPFhaUucEjxrQ2P']
+		})
 
                 # Анализ портфеля и позиций
                 symbols = ['BTC/USDT', 'ETH/USDT', 'ADA/USDT', 'XRP/USDT', 'SOL/USDT', 'BNB/USDT']

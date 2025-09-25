@@ -724,7 +724,7 @@ class WebTradingDashboard:
 
         # Запуск в отдельном потоке
         server_thread = threading.Thread(
-            target=lambda: self.app.run(host=host, port=port, debug=debug),
+            target=lambda: self.socketio.run(self.app, host=host, port=port, debug=debug),
             daemon=True
         )
         server_thread.start()

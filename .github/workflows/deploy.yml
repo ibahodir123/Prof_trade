@@ -19,7 +19,8 @@ jobs:
         echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
-
+        # ДОБАВИТЬ ЭТУ СТРОКУ:
+        echo "SSH ключ сохранен, проверяем..." && ls -la ~/.ssh/
     - name: 📤 Deploy to server
       run: |
         echo "🚀 Начинаем развертывание на сервер ${{ secrets.SERVER_IP }}..."

@@ -34,7 +34,7 @@ class WebTradingDashboard:
     def __init__(self):
         self.app = Flask(__name__)
         self.app.secret_key = 'your-secret-key-here'
-        self.socketio = SocketIO(self.app)
+        self.socketio = SocketIO(self.app, async_mode='eventlet')
 
         # Инициализация бота
         self.bot = None

@@ -120,7 +120,7 @@ class WebTradingDashboard:
             """Данные рынка"""
             try:
                 config = load_config()
-                exchange = ccxt.binance({
+    exchange = ccxt.binance({
                     'apiKey': config['binance_api']['api_key'],
                     'secret': config['binance_api']['secret_key']
                 })
@@ -155,7 +155,7 @@ class WebTradingDashboard:
             """Текущие сигналы"""
             try:
                 config = load_config()
-                exchange = ccxt.binance({
+    exchange = ccxt.binance({
                     'apiKey': config['binance_api']['api_key'],
                     'secret': config['binance_api']['secret_key']
                 })
@@ -218,7 +218,7 @@ class WebTradingDashboard:
             """Статистика торговли"""
             try:
                 config = load_config()
-                exchange = ccxt.binance({
+    exchange = ccxt.binance({
                     'apiKey': config['binance_api']['api_key'],
                     'secret': config['binance_api']['secret_key']
                 })

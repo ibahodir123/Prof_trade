@@ -97,7 +97,7 @@ class WebTradingDashboard:
         def start_bot():
             """Запуск бота"""
     if not self.bot_running:
-                try:
+    if not self.bot_running:
                     self.start_bot_thread()
                     return jsonify({'success': True, 'message': 'Бот запущен'})
                 except Exception as e:

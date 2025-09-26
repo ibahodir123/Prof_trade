@@ -96,7 +96,7 @@ class WebTradingDashboard:
         @self.app.route('/api/bot/start', methods=['POST'])
         def start_bot():
             """Запуск бота"""
-            if not self.bot_running:
+    if not self.bot_running:
                 try:
                     self.start_bot_thread()
                     return jsonify({'success': True, 'message': 'Бот запущен'})

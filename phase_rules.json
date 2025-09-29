@@ -1,0 +1,14 @@
+﻿{
+  "timeframe": "4h",
+  "impulse": {
+    "w_speed": { "max": 0.0015 },
+    "w_distance": { "max": 0.0015 },
+    "w_angle": { "min": 0.9992 }
+  },
+  "correction": {
+    "w_speed": { "max": 0.0020 },
+    "w_distance": { "max": 0.0015 },
+    "w_angle": { "min": 0.9994 }
+  },
+  "notes": "Thresholds derived from BTC/USDT 4h training (2020-2024). Check that normalized weights fall within these bounds to validate impulse/correction phases."
+}

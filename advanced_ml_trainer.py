@@ -359,6 +359,42 @@ class AdvancedMLTrainer:
             X = np.array(historical_data)
             n_samples, n_features = X.shape
             logger.info("Training dataset: %d samples, %d features", n_samples, n_features)
+            # --- collect phase weights ---
+            impulse_weights = []
+            correction_weights = []
+            for row in X:
+                speed = float(row[11])
+                distance = float(row[12])
+                angle = float(row[13])
+                phase = float(row[20])
+
+                total = abs(speed) + abs(distance) + abs(angle)
+                if total == 0.0:
+                    weight = (0.0, 0.0, 0.0)
+                else:
+                    weight = (abs(speed) / total, abs(distance) / total, abs(angle) / total)
+
+                if phase >= 0.5:
+                    impulse_weights.append(weight)
+                else:
+                    correction_weights.append(weight)
+
+            def aggregate(weights):
+                if not weights:
+                    return {"count": 0}
+                import numpy as np
+                arr = np.array(weights)
+                return {
+                    "count": len(weights),
+                    "mean": arr.mean(axis=0).tolist(),
+                    "median": np.median(arr, axis=0).tolist(),
+                    "min": arr.min(axis=0).tolist(),
+                    "max": arr.max(axis=0).tolist(),
+                }
+
+            impulse_stats = aggregate(impulse_weights)
+            correction_stats = aggregate(correction_weights)
+
 
             entry_condition = (
                 (X[:, 10] == 2)
@@ -395,6 +431,7 @@ class AdvancedMLTrainer:
 
             training_period = f"{start_date.date()}_{end_date.date()}"
             self.save_models_with_metadata(symbols, n_samples, entry_score, exit_score, training_period, timeframe)
+            self.save_phase_stats(impulse_stats, correction_stats, timeframe)
             logger.info("Training finished successfully")
             return True
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -532,6 +569,20 @@ class AdvancedMLTrainer:
     # ------------------------------------------------------------------
     # Metadata helpers
     # ------------------------------------------------------------------
+    def save_phase_stats(self, impulse_stats: dict, correction_stats: dict, timeframe: str) -> None:
+        """Persist aggregated weights for impulse and correction phases."""
+        try:
+            os.makedirs("models", exist_ok=True)
+            payload = {
+                "impulse": impulse_stats,
+                "correction": correction_stats,
+                "timeframe": timeframe,
+            }
+            with open("models/phase_weight_stats.json", "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Failed to save phase weight statistics: %s", exc)
+
     def save_models_with_metadata(
         self,
         symbols: List[str],

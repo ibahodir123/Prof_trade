@@ -112,6 +112,7 @@ class OptimizedMLBot:
         self.risk_manager = OptimizedRiskManager()
         self.ema_analyzer = AdvancedEMAAnalyzer()
         self.ml_trainer = AdvancedMLTrainer()
+        self.phase_rules = self.ml_trainer._load_phase_rules()
         self.shooting_star_predictor = ShootingStarPredictor()
         
         # Загружаем оптимизированные модели
@@ -250,6 +251,14 @@ class OptimizedMLBot:
             message += f"💰 Цена: ${signal['price']:,.2f}\n"
             message += f"🎯 Уверенность: {signal['confidence']:.1%}\n"
             message += f"📊 Размер позиции: {position_size:.1%}\n"
+            phase_label = signal.get('phase')
+            if phase_label:
+                phase_match = signal.get('phase_match')
+                status_icon = '✅' if phase_match else '❌'
+                weights = signal.get('phase_weights') or dict()
+                message += f"Фаза: {phase_label} {status_icon}\n"
+                if weights:
+                    message += f"Доли (скор/дист/угол): {weights.get('w_speed', 0):.6f} / {weights.get('w_distance', 0):.6f} / {weights.get('w_angle', 0):.6f}\n"
             message += f"⏰ Время: {signal['timestamp']}\n\n"
         
         message += f"🛡️ **Управление рисками активно**\n"
@@ -284,14 +293,33 @@ class OptimizedMLBot:
                     if analysis and analysis.get('signal') in ['BUY', 'SELL']:
                         # Получаем ML предсказание
                         ml_features = self.ema_analyzer.extract_ml_features(df)
-                        
-                        if analysis['signal'] == 'BUY':
-                            # Предсказание для минимума
-                            prediction = self.predict_minimum(ml_features)
+                        trainer_features = self.ml_trainer.generate_features_from_data(df)
+
+                        phase_label = None
+                        phase_weights = None
+                        phase_match = True
+                        if trainer_features is not None and len(trainer_features) >= 21:
+                            speed_feature = float(trainer_features[11])
+                            distance_feature = float(trainer_features[12])
+                            angle_feature = float(trainer_features[13])
+                            phase_state = float(trainer_features[20])
+                            phase_label = 'impulse' if phase_state >= 0.5 else 'correction'
+                            phase_weights = self.ml_trainer._compute_phase_weights(speed_feature, distance_feature, angle_feature)
+                            if self.phase_rules:
+                                phase_match = self.ml_trainer._matches_phase_rules(phase_weights, self.phase_rules.get(phase_label))
                         else:
-                            # Предсказание для максимума
+                            phase_match = False
+
+                        if analysis['signal'] == 'BUY':
+                            prediction = self.predict_minimum(ml_features)
+                            required_phase = 'impulse'
+                        else:
                             prediction = self.predict_maximum(ml_features)
-                        
+                            required_phase = 'correction'
+
+                        if phase_label != required_phase or not phase_match:
+                            continue
+
                         if prediction['is_good_signal'] and prediction['confidence'] > 0.6:
                             signals.append({
                                 'symbol': symbol,
@@ -299,7 +327,10 @@ class OptimizedMLBot:
                                 'price': df['close'].iloc[-1],
                                 'confidence': prediction['confidence'],
                                 'timestamp': datetime.now().strftime('%H:%M:%S'),
-                                'analysis': analysis
+                                'analysis': analysis,
+                                'phase': phase_label,
+                                'phase_match': phase_match,
+                                'phase_weights': phase_weights
                             })
                 
                 except Exception as e:

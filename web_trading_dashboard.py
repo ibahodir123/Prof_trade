@@ -201,6 +201,18 @@ class WebTradingDashboard:
             if not result:
                 return jsonify({"success": False, "error": "Backtest failed or returned no data"}), 500
 
+            phase_records = result.get('phase_records', [])
+            impulse_total = sum(1 for record in phase_records if record.get('phase') == 'impulse')
+            impulse_ok = sum(1 for record in phase_records if record.get('phase') == 'impulse' and record.get('match'))
+            correction_total = sum(1 for record in phase_records if record.get('phase') == 'correction')
+            correction_ok = sum(1 for record in phase_records if record.get('phase') == 'correction' and record.get('match'))
+            result['phase_summary'] = {
+                'impulse_total': impulse_total,
+                'impulse_ok': impulse_ok,
+                'correction_total': correction_total,
+                'correction_ok': correction_ok,
+            }
+
             return jsonify({"success": True, "result": result})
 
         @self.app.route("/api/signals/current")
@@ -560,6 +572,10 @@ document.addEventListener('DOMContentLoaded', function () {
                         <div class="col-md-3"><strong>Average trade:</strong> ${result.average_trade_return_pct}%</div>
                         <div class="col-md-3"><strong>Entry >=</strong> ${result.entry_threshold}</div>
                         <div class="col-md-3"><strong>Exit >=</strong> ${result.exit_threshold}</div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-6"><strong>Impulse matches:</strong> ${result.phase_summary ? `${result.phase_summary.impulse_ok}/${result.phase_summary.impulse_total}` : 'n/a'}</div>
+                        <div class="col-md-6"><strong>Correction matches:</strong> ${result.phase_summary ? `${result.phase_summary.correction_ok}/${result.phase_summary.correction_total}` : 'n/a'}</div>
                     </div>
                 </div>
             </div>

@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import json
+from pathlib import Path
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -46,6 +48,8 @@ class AdvancedMLTrainer:
         self.exit_model: Optional[RandomForestClassifier] = None
         self.scaler: Optional[StandardScaler] = None
         self.feature_names: Optional[List[str]] = None
+        self.phase_rules: Optional[Dict[str, Any]] = None
+
 
     # ------------------------------------------------------------------
     # Model loading / inference helpers
@@ -62,6 +66,44 @@ class AdvancedMLTrainer:
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("Failed to load ML artefacts: %s", exc)
             return False
+
+    def _load_phase_rules(self) -> Dict[str, Any]:
+        if self.phase_rules is None:
+            rules_path = Path("phase_rules.json")
+            if rules_path.exists():
+                try:
+                    self.phase_rules = json.loads(rules_path.read_text(encoding="utf-8"))
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error("Failed to load phase rules: %s", exc)
+                    self.phase_rules = {}
+            else:
+                self.phase_rules = {}
+        return self.phase_rules
+
+    @staticmethod
+    def _compute_phase_weights(speed: float, distance: float, angle: float) -> Dict[str, float]:
+        total = abs(speed) + abs(distance) + abs(angle)
+        if total == 0.0:
+            return {"w_speed": 0.0, "w_distance": 0.0, "w_angle": 0.0}
+        return {
+            "w_speed": abs(speed) / total,
+            "w_distance": abs(distance) / total,
+            "w_angle": abs(angle) / total,
+        }
+
+    @staticmethod
+    def _matches_phase_rules(weights: Dict[str, float], rules: Optional[Dict[str, Dict[str, float]]]) -> bool:
+        if not rules:
+            return True
+        for key, bounds in rules.items():
+            value = weights.get(key, 0.0)
+            minimum = bounds.get("min")
+            maximum = bounds.get("max")
+            if minimum is not None and value < minimum:
+                return False
+            if maximum is not None and value > maximum:
+                return False
+        return True
 
     def _ensure_models_loaded(self) -> bool:
         if self.entry_model is None or self.exit_model is None or self.scaler is None:
@@ -469,6 +511,9 @@ class AdvancedMLTrainer:
         capital = initial_capital
         equity_curve: List[Dict[str, Any]] = []
         trades: List[BacktestTrade] = []
+        phase_records: List[Dict[str, Any]] = []
+
+        phase_rules = self._load_phase_rules()
 
         position_open = False
         entry_price = 0.0
@@ -480,9 +525,31 @@ class AdvancedMLTrainer:
             if features is None:
                 continue
 
-            entry_prob, exit_prob = self.predict_entry_exit(features)
             price = float(df.iloc[idx]["close"])
             timestamp = datetime.utcfromtimestamp(float(df.iloc[idx]["timestamp"]) / 1000.0)
+            entry_prob, exit_prob = self.predict_entry_exit(features)
+
+            speed_feature = float(features[11]) if len(features) > 11 else 0.0
+            distance_feature = float(features[12]) if len(features) > 12 else 0.0
+            angle_feature = float(features[13]) if len(features) > 13 else 0.0
+            phase_state = float(features[20]) if len(features) > 20 else 0.0
+            phase_label = "impulse" if phase_state >= 0.5 else "correction"
+            weights = self._compute_phase_weights(speed_feature, distance_feature, angle_feature)
+            phase_ok = self._matches_phase_rules(weights, phase_rules.get(phase_label)) if phase_rules else True
+
+            phase_records.append({
+                "timestamp": timestamp.isoformat(),
+                "phase": phase_label,
+                "weights": {k: round(v, 6) for k, v in weights.items()},
+                "match": phase_ok,
+            })
+
+            if not position_open:
+                if phase_label != "impulse" or not phase_ok:
+                    entry_prob = 0.0
+            else:
+                if phase_label != "correction" or not phase_ok:
+                    exit_prob = 0.0
 
             current_equity = capital if not position_open else capital * (price / entry_price)
             equity_curve.append({"timestamp": timestamp.isoformat(), "equity": round(current_equity, 2)})
@@ -564,6 +631,7 @@ class AdvancedMLTrainer:
             "win_rate_pct": round(win_rate, 2),
             "average_trade_return_pct": round(avg_trade, 2),
             "equity_curve": equity_curve,
+            "phase_records": phase_records,
         }
 
     # ------------------------------------------------------------------

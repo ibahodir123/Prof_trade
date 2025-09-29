@@ -1,14 +1,14 @@
 {
-  "training_date": "2025-09-29T04:29:40.447591",
+  "training_date": "2025-09-29T15:41:15.343041",
   "symbols_used": [
     "BTC/USDT"
   ],
-  "samples_count": 4336,
+  "samples_count": 10911,
   "features_count": 21,
   "entry_model_score": 1.0,
   "exit_model_score": 1.0,
   "data_source": "real_binance_historical",
-  "training_period": "2023-01-01_2024-12-31",
+  "training_period": "2020-01-01_2024-12-31",
   "timeframe": "4h",
   "model_type": "RandomForestClassifier",
   "scaler_type": "StandardScaler"

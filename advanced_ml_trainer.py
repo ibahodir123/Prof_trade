@@ -259,33 +259,76 @@ class AdvancedMLTrainer:
             ema20 = float(latest.get("ema_20", 0.0))
             ema50 = float(latest.get("ema_50", 0.0))
             ema100 = float(latest.get("ema_100", 0.0))
-            close = float(latest.get("close", 0.0))
+            close_price = float(latest.get("close", 0.0))
+
             ema20_prev5 = float(df["ema_20"].iloc[-5])
             ema50_prev5 = float(df["ema_50"].iloc[-5])
+            ema100_prev5 = float(df["ema_100"].iloc[-5])
             ema20_prev10 = float(df["ema_20"].iloc[-10])
+            close_prev5 = float(df["close"].iloc[-5])
+            ema20_prev6 = float(df["ema_20"].iloc[-6])
+            ema50_prev6 = float(df["ema_50"].iloc[-6])
 
             def safe_div(numerator: float, denominator: float) -> float:
                 return numerator / denominator if denominator not in (0.0, -0.0) else 0.0
 
-            if ema20 > ema50:
+            if ema20 > ema50 > ema100:
                 trend_state = 2.0
-            elif abs(ema20 - ema50) < close * 0.01:
-                trend_state = 3.0
+                trend_direction = 1.0
+            elif ema20 < ema50 < ema100:
+                trend_state = 0.0
+                trend_direction = -1.0
             else:
                 trend_state = 1.0
+                trend_direction = 0.0
+
+            slope_ema20 = safe_div(ema20 - ema20_prev5, 5.0)
+            slope_ema50 = safe_div(ema50 - ema50_prev5, 5.0)
+            slope_ema100 = safe_div(ema100 - ema100_prev5, 5.0)
+            slope_price = safe_div(close_price - close_prev5, 5.0)
+
+            angle_ema20 = float(np.degrees(np.arctan(slope_ema20)))
+            angle_ema50 = float(np.degrees(np.arctan(slope_ema50)))
+            angle_ema100 = float(np.degrees(np.arctan(slope_ema100)))
+
+            diff_now = ema20 - ema50
+            diff_prev = ema20_prev6 - ema50_prev6
+            if trend_direction > 0:
+                impulse = angle_ema20 > 0 and diff_now > diff_prev
+            elif trend_direction < 0:
+                impulse = angle_ema20 < 0 and diff_now < diff_prev
+            else:
+                impulse = False
+            phase_state = 1.0 if impulse else 0.0
+
+            total_ema = ema20 + ema50 + ema100 if (ema20 + ema50 + ema100) != 0 else 1.0
+            ema20_weight = ema20 / total_ema
+            ema50_weight = ema50 / total_ema
+            ema100_weight = ema100 / total_ema
 
             features = np.array(
                 [
                     ema20,
                     ema50,
                     ema100,
-                    safe_div(ema20 - ema20_prev5, ema20_prev5),
-                    safe_div(ema50 - ema50_prev5, ema50_prev5),
-                    safe_div(close - ema20, ema20 if ema20 else 1.0),
-                    safe_div(ema20 - ema50, ema50 if ema50 else 1.0),
-                    safe_div(close - ema20, ema20 if ema20 else 1.0),
-                    float(np.degrees(np.arctan(safe_div(ema20 - ema20_prev10, ema20_prev10)))),
+                    safe_div(ema20 - ema20_prev5, abs(ema20_prev5) if ema20_prev5 else 1.0),
+                    safe_div(ema50 - ema50_prev5, abs(ema50_prev5) if ema50_prev5 else 1.0),
+                    safe_div(ema100 - ema100_prev5, abs(ema100_prev5) if ema100_prev5 else 1.0),
+                    safe_div(ema20 - ema50, abs(ema50) if ema50 else 1.0),
+                    safe_div(ema50 - ema100, abs(ema100) if ema100 else 1.0),
+                    safe_div(ema20 - ema100, abs(ema100) if ema100 else 1.0),
+                    safe_div(ema20 - ema20_prev10, abs(ema20_prev10) if ema20_prev10 else 1.0),
                     trend_state,
+                    safe_div(close_price - close_prev5, abs(close_prev5) if close_prev5 else 1.0),
+                    safe_div(close_price - ema20, abs(ema20) if ema20 else 1.0),
+                    angle_ema20,
+                    angle_ema50,
+                    angle_ema100,
+                    ema20_weight,
+                    ema50_weight,
+                    ema100_weight,
+                    trend_direction,
+                    phase_state,
                 ]
             )
             return features
@@ -296,18 +339,18 @@ class AdvancedMLTrainer:
     # ------------------------------------------------------------------
     # Training pipeline
     # ------------------------------------------------------------------
-    def train_models(self, symbols: List[str]) -> bool:
+    def train_models(self, symbols: List[str], start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, timeframe: str = "1h") -> bool:
         """Train entry/exit classifiers on historical data."""
         try:
-            start_date = datetime(2020, 1, 1)
-            end_date = datetime(2024, 12, 31, 23, 59, 59)
+            start_date = start_date or datetime(2020, 1, 1)
+            end_date = end_date or datetime(2024, 12, 31, 23, 59, 59)
 
-            logger.info("Starting model training for period %s -> %s", start_date, end_date)
+            logger.info("Starting model training for period %s -> %s (timeframe=%s)", start_date, end_date, timeframe)
             historical_data = self.collect_historical_data(
                 symbols,
                 start_date=start_date,
                 end_date=end_date,
-                timeframe="1h",
+                timeframe=timeframe,
             )
             if historical_data is None:
                 logger.error("Training aborted: no historical data collected")
@@ -317,11 +360,23 @@ class AdvancedMLTrainer:
             n_samples, n_features = X.shape
             logger.info("Training dataset: %d samples, %d features", n_samples, n_features)
 
-            entry_condition = (X[:, 3] > 0.005) & (X[:, 5] < -0.01) & (X[:, 9] == 2)
+            entry_condition = (
+                (X[:, 10] == 2)
+                & (X[:, 20] == 1)
+                & (X[:, 11] > 0.0)
+                & (X[:, 12] > 0.0)
+                & (X[:, 13] > 0.0)
+            )
             y_entry = entry_condition.astype(int)
             y_entry = (y_entry + np.random.choice([0, 1], n_samples, p=[0.3, 0.7])).clip(0, 1)
 
-            exit_condition = (X[:, 3] < -0.005) & (X[:, 5] > 0.01) & (X[:, 9] == 1)
+            exit_condition = (
+                (X[:, 10] != 2)
+                | (X[:, 20] == 0)
+                | (X[:, 11] <= 0.0)
+                | (X[:, 12] <= 0.0)
+                | (X[:, 13] <= 0.0)
+            )
             y_exit = exit_condition.astype(int)
             y_exit = (y_exit + np.random.choice([0, 1], n_samples, p=[0.2, 0.8])).clip(0, 1)
 
@@ -339,7 +394,7 @@ class AdvancedMLTrainer:
             logger.info("Exit model score: %.4f", exit_score)
 
             training_period = f"{start_date.date()}_{end_date.date()}"
-            self.save_models_with_metadata(symbols, n_samples, entry_score, exit_score, training_period)
+            self.save_models_with_metadata(symbols, n_samples, entry_score, exit_score, training_period, timeframe)
             logger.info("Training finished successfully")
             return True
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -484,6 +539,7 @@ class AdvancedMLTrainer:
         entry_score: float,
         exit_score: float,
         training_period: Optional[str] = None,
+        timeframe: str = "1h",
     ) -> None:
         """Persist trained artefacts alongside metadata."""
         try:
@@ -497,13 +553,24 @@ class AdvancedMLTrainer:
                 "ema_20",
                 "ema_50",
                 "ema_100",
-                "ema20_pct_change",
-                "ema50_pct_change",
-                "price_vs_ema20",
-                "ema20_minus_ema50_pct",
-                "price_minus_ema20_pct",
-                "trend_angle",
+                "ema20_change_5",
+                "ema50_change_5",
+                "ema100_change_5",
+                "ema20_vs_ema50_pct",
+                "ema50_vs_ema100_pct",
+                "ema20_vs_ema100_pct",
+                "ema20_change_10",
                 "trend_state",
+                "price_speed_5",
+                "price_vs_ema20_pct",
+                "angle_ema20_deg",
+                "angle_ema50_deg",
+                "angle_ema100_deg",
+                "ema20_weight",
+                "ema50_weight",
+                "ema100_weight",
+                "trend_direction",
+                "phase_state",
             ]
             joblib.dump(feature_names, "models/feature_names.pkl")
 
@@ -516,6 +583,7 @@ class AdvancedMLTrainer:
                 "exit_model_score": exit_score,
                 "data_source": "real_binance_historical",
                 "training_period": training_period or "unspecified",
+                "timeframe": timeframe,
                 "model_type": "RandomForestClassifier",
                 "scaler_type": "StandardScaler",
             }

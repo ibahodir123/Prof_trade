@@ -72,7 +72,8 @@ class AdvancedMLTrainer:
             rules_path = Path("phase_rules.json")
             if rules_path.exists():
                 try:
-                    self.phase_rules = json.loads(rules_path.read_text(encoding="utf-8"))
+                    raw = rules_path.read_text(encoding="utf-8-sig")
+                    self.phase_rules = json.loads(raw)
                 except Exception as exc:  # pragma: no cover - defensive logging
                     logger.error("Failed to load phase rules: %s", exc)
                     self.phase_rules = {}

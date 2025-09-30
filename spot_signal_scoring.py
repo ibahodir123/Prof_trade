@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Mapping, Tuple
 
-from spot_pipeline_settings import summary_path
+from spot_pipeline_settings import FeatureStats, summary_path
 
 FeatureMap = Mapping[str, float]
 
@@ -20,6 +20,8 @@ class ScoreResult:
     z_scores: Dict[str, float]
     confidence: str
     numeric_weight: float
+    stop_loss: float | None = None
+    take_profit: float | None = None
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,9 @@ class _ProfileWeights:
     means: Dict[str, float]
     stds: Dict[str, float]
     thresholds: Tuple[float, float, float]
+
+    def feature_stats(self, name: str) -> FeatureStats:
+        return FeatureStats(self.means[name], self.stds[name])
 
 
 class ImpulseScorer:
@@ -43,13 +48,19 @@ class ImpulseScorer:
         self._downtrend = self._load_profile(downtrend_weights)
         self._uptrend = self._load_profile(uptrend_weights)
 
-    def score_long_entry(self, features: FeatureMap) -> ScoreResult:
+    def score_long_entry(self, features: FeatureMap, *, price: float | None = None, swing_low: float | None = None) -> ScoreResult:
         """Return confidence that the current state is a long entry minimum."""
-        return self._score(features, self._downtrend)
+        base = self._score(features, self._downtrend)
+        stop_loss = self._compute_stop_loss(base, price, swing_low)
+        take_profit = self._compute_take_profit(base, price)
+        return ScoreResult(base.composite_z, base.z_scores, base.confidence, base.numeric_weight, stop_loss, take_profit)
 
-    def score_long_exit(self, features: FeatureMap) -> ScoreResult:
+    def score_long_exit(self, features: FeatureMap, *, price: float | None = None, swing_high: float | None = None) -> ScoreResult:
         """Return confidence that the current state is a long exit maximum."""
-        return self._score(features, self._uptrend)
+        base = self._score(features, self._uptrend)
+        stop_loss = self._compute_stop_loss(base, price, swing_high, is_exit=True)
+        take_profit = self._compute_take_profit(base, price, is_exit=True)
+        return ScoreResult(base.composite_z, base.z_scores, base.confidence, base.numeric_weight, stop_loss, take_profit)
 
     def _score(self, features: FeatureMap, weights: _ProfileWeights) -> ScoreResult:
         values = self._extract_features(features)
@@ -114,6 +125,46 @@ class ImpulseScorer:
             float(composite.get("p75", 0.0)),
         )
         return _ProfileWeights(means, stds, thresholds)
+
+    def _compute_stop_loss(
+        self,
+        score: ScoreResult,
+        price: float | None,
+        swing: float | None,
+        *,
+        is_exit: bool = False,
+        distance_multiplier: float = 1.0,
+    ) -> float | None:
+        if price is None or swing is None:
+            return None
+        stats = self._downtrend.feature_stats("distance_pct") if not is_exit else self._uptrend.feature_stats("distance_pct")
+        abs_distance = abs(score.z_scores.get("distance_pct", 0.0)) * stats.std + abs(stats.mean)
+        length_z = score.z_scores.get("length", 0.0)
+        adjustment = abs_distance * (1.0 + 0.2 * length_z)
+        if not is_exit:
+            level = min(price, swing)
+            stop = level * (1 - adjustment * distance_multiplier)
+        else:
+            level = max(price, swing)
+            stop = level * (1 + adjustment * 0.5)
+        return max(stop, 0.0)
+
+    def _compute_take_profit(
+        self,
+        score: ScoreResult,
+        price: float | None,
+        *,
+        is_exit: bool = False,
+    ) -> float | None:
+        if price is None:
+            return None
+        stats = self._uptrend.feature_stats("distance_pct") if not is_exit else self._downtrend.feature_stats("distance_pct")
+        abs_distance = abs(score.z_scores.get("distance_pct", 0.0)) * stats.std + abs(stats.mean)
+        length_z = score.z_scores.get("length", 0.0)
+        gain = abs_distance * (1.2 - 0.1 * length_z)
+        if not is_exit:
+            return price * (1 + gain)
+        return price * (1 - gain * 0.5)
 
 
 def load_default_scorer(root: Path | None = None) -> ImpulseScorer:

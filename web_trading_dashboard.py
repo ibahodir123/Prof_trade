@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import ccxt
+import numpy as np
 import pandas as pd
 import psutil
 from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO, emit
 
 from advanced_ml_trainer import AdvancedMLTrainer
+from spot_signal_scoring import load_default_scorer
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,12 @@ class WebTradingDashboard:
         self.config = _load_config()
         self.symbols = ["BTC/USDT", "ETH/USDT", "ADA/USDT", "XRP/USDT", "SOL/USDT", "BNB/USDT"]
         self.update_interval = 5
+
+        try:
+            self.scorer = load_default_scorer()
+        except Exception as exc:
+            logger.warning("Failed to load impulse scorer: %s", exc)
+            self.scorer = None
 
         self.ml_trainer = AdvancedMLTrainer()
         if not self.ml_trainer._ensure_models_loaded():  # type: ignore[attr-defined]
@@ -218,6 +226,9 @@ class WebTradingDashboard:
         @self.app.route("/api/signals/current")
         def current_signals() -> Any:
             try:
+                if self.scorer is None:
+                    raise RuntimeError("Impulse scorer not initialized")
+
                 config = _load_config()
                 exchange = ccxt.binance(
                     {
@@ -230,45 +241,109 @@ class WebTradingDashboard:
                 signals: Dict[str, Dict[str, Any]] = {}
                 for symbol in self.symbols:
                     try:
-                        ohlcv = exchange.fetch_ohlcv(symbol, "1h", limit=60)
-                        if not ohlcv:
+                        ohlcv = exchange.fetch_ohlcv(symbol, "1h", limit=200)
+                        if not ohlcv or len(ohlcv) < 60:
                             raise ValueError("Not enough candles")
 
-                        df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                        df = pd.DataFrame(
+                            ohlcv,
+                            columns=["timestamp", "open", "high", "low", "close", "volume"],
+                        )
                         df["ema20"] = df["close"].ewm(span=20).mean()
+                        df["price_speed_5"] = (df["close"] - df["close"].shift(5)) / df["close"].shift(5)
+                        df["distance_pct"] = (df["close"] - df["ema20"]) / df["ema20"]
+                        slope = (df["ema20"] - df["ema20"].shift(5)) / 5
+                        df["angle_ema20_deg"] = np.degrees(np.arctan(slope))
+                        df["close_diff"] = df["close"].diff()
 
-                        price_now = float(df["close"].iloc[-1])
-                        price_prev = float(df["close"].iloc[-5])
-                        ema_now = float(df["ema20"].iloc[-1])
-                        ema_prev = float(df["ema20"].iloc[-5])
-
-                        if price_now > ema_now and price_prev <= ema_prev:
-                            signal_type = "BUY"
-                            probability = min(0.9, abs(price_now - ema_now) / max(price_now, 1e-8) + 0.7)
-                        elif price_now < ema_now and price_prev >= ema_prev:
-                            signal_type = "SELL"
-                            probability = min(0.9, abs(price_now - ema_now) / max(price_now, 1e-8) + 0.7)
+                        down_length = 0
+                        up_length = 0
+                        for diff in df["close_diff"].iloc[:-1]:
+                            if diff < 0:
+                                down_length = down_length + 1 if down_length > 0 else 1
+                                up_length = 0
+                            elif diff > 0:
+                                up_length = up_length + 1 if up_length > 0 else 1
+                                down_length = 0
+                            else:
+                                down_length = down_length + 1 if down_length > 0 else 0
+                                up_length = up_length + 1 if up_length > 0 else 0
+                        last_diff = df["close_diff"].iloc[-1]
+                        if last_diff < 0:
+                            down_length = down_length + 1 if down_length > 0 else 1
+                            up_length = 0
+                        elif last_diff > 0:
+                            up_length = up_length + 1 if up_length > 0 else 1
+                            down_length = 0
                         else:
-                            signal_type = "HOLD"
-                            probability = 0.5
+                            down_length = down_length + 1 if down_length > 0 else 0
+                            up_length = up_length + 1 if up_length > 0 else 0
+
+                        row = df.iloc[-1]
+                        price = float(row["close"])
+                        swing_low = float(row["low"])
+                        swing_high = float(row["high"])
+
+                        entry_features = {
+                            "price_speed_5": float(row["price_speed_5"]),
+                            "distance_pct": float(row["distance_pct"]),
+                            "angle_ema20_deg": float(row["angle_ema20_deg"]),
+                            "length": float(down_length),
+                        }
+                        exit_features = {
+                            "price_speed_5": float(row["price_speed_5"]),
+                            "distance_pct": float(row["distance_pct"]),
+                            "angle_ema20_deg": float(row["angle_ema20_deg"]),
+                            "length": float(up_length),
+                        }
+
+                        entry_score = self.scorer.score_long_entry(entry_features, price=price, swing_low=swing_low)
+                        exit_score = self.scorer.score_long_exit(exit_features, price=price, swing_high=swing_high)
+
+                        signal_type = "HOLD"
+                        probability = max(entry_score.numeric_weight, exit_score.numeric_weight)
+                        if entry_score.numeric_weight >= 0.66 and entry_score.numeric_weight >= exit_score.numeric_weight:
+                            signal_type = "BUY"
+                            probability = entry_score.numeric_weight
+                        elif exit_score.numeric_weight >= 0.66 and exit_score.numeric_weight > entry_score.numeric_weight:
+                            signal_type = "SELL"
+                            probability = exit_score.numeric_weight
 
                         signals[symbol] = {
                             "signal": signal_type,
                             "probability": round(probability, 3),
-                            "price": round(price_now, 2),
-                            "timestamp": datetime.now().isoformat(),
+                            "price": round(price, 2),
+                            "entry": {
+                                "confidence": entry_score.confidence,
+                                "numeric_weight": entry_score.numeric_weight,
+                                "composite_z": entry_score.composite_z,
+                                "stop_loss": float(entry_score.stop_loss) if entry_score.stop_loss is not None else None,
+                                "take_profit": float(entry_score.take_profit) if entry_score.take_profit is not None else None,
+                                "features": {k: float(v) for k, v in entry_features.items()},
+                                "z_scores": {k: float(v) for k, v in entry_score.z_scores.items()},
+                            },
+                            "exit": {
+                                "confidence": exit_score.confidence,
+                                "numeric_weight": exit_score.numeric_weight,
+                                "composite_z": exit_score.composite_z,
+                                "stop_loss": float(exit_score.stop_loss) if exit_score.stop_loss is not None else None,
+                                "take_profit": float(exit_score.take_profit) if exit_score.take_profit is not None else None,
+                                "features": {k: float(v) for k, v in exit_features.items()},
+                                "z_scores": {k: float(v) for k, v in exit_score.z_scores.items()},
+                            },
                         }
-                    except Exception as symbol_error:  # pragma: no cover - per-symbol guard
+                    except Exception as symbol_error:
+                        logger.warning("Failed to build signal for %s: %s", symbol, symbol_error)
                         signals[symbol] = {
-                            "signal": "HOLD",
+                            "signal": "ERROR",
                             "probability": 0.0,
                             "price": 0.0,
-                            "timestamp": datetime.now().isoformat(),
                             "error": str(symbol_error),
                         }
 
                 return jsonify({"success": True, "signals": signals})
-            except Exception as exc:  # pragma: no cover
+            except Exception as exc:
+                logger.exception("Failed to fetch signals: %s", exc)
                 return jsonify({"success": False, "error": str(exc)})
 
         @self.app.route("/api/statistics")
@@ -589,8 +664,8 @@ document.addEventListener('DOMContentLoaded', function () {
                                     <th>#</th>
                                     <th>Entry</th>
                                     <th>Exit</th>
-                                    <th>Entry >=rice</th>
-                                    <th>Exit >=rice</th>
+                                    <th>Entry price</th>
+                                    <th>Exit price</th>
                                     <th>Return %</th>
                                 </tr>
                             </thead>
@@ -686,16 +761,87 @@ document.addEventListener('DOMContentLoaded', function () {
                     return;
                 }
                 const list = document.getElementById('signalsList');
+                const confidenceChart = document.getElementById('confidenceChart');
                 list.innerHTML = '';
+
+                const labels = [];
+                const entryWeights = [];
+                const exitWeights = [];
+
                 Object.entries(data.signals).forEach(([symbol, payload]) => {
-                    const alertClass = payload.signal === 'BUY' ? 'success' : (payload.signal === 'SELL' ? 'danger' : 'secondary');
+                    if (payload.signal === 'ERROR') {
+                        list.innerHTML += `<div class="alert alert-warning"><strong>${symbol}</strong>: ${payload.error || 'Unavailable'}</div>`;
+                        return;
+                    }
+
+                    const entry = payload.entry || {};
+                    const exit = payload.exit || {};
+                    const features = entry.features || {};
+                    const zScores = entry.z_scores || {};
+
+                    const featureRows = Object.keys(features).map((name) => {
+                        const value = typeof features[name] === 'number' ? features[name] : 0;
+                        const z = typeof zScores[name] === 'number' ? zScores[name] : 0;
+                        return `<tr><td>${name}</td><td>${value.toFixed(6)}</td><td>${z.toFixed(3)}</td></tr>`;
+                    }).join('');
+
+                    const stopLoss = typeof entry.stop_loss === 'number' ? `$${entry.stop_loss.toFixed(2)}` : '—';
+                    const takeProfit = typeof entry.take_profit === 'number' ? `$${entry.take_profit.toFixed(2)}` : '—';
+                    const exitStop = typeof exit.stop_loss === 'number' ? `$${exit.stop_loss.toFixed(2)}` : '—';
+                    const exitTake = typeof exit.take_profit === 'number' ? `$${exit.take_profit.toFixed(2)}` : '—';
+
+                    const badgeClass = payload.signal === 'BUY' ? 'bg-success' : (payload.signal === 'SELL' ? 'bg-danger' : 'bg-secondary');
+                    const entryComposite = typeof entry.composite_z === 'number' ? entry.composite_z : 0;
+                    const exitComposite = typeof exit.composite_z === 'number' ? exit.composite_z : 0;
+                    const entryWeight = typeof entry.numeric_weight === 'number' ? entry.numeric_weight : 0;
+                    const exitWeight = typeof exit.numeric_weight === 'number' ? exit.numeric_weight : 0;
+
                     list.innerHTML += `
-                        <div class="alert alert-${alertClass}">
-                            <strong>${symbol}</strong>: ${payload.signal}<br />
-                            Probability: ${(payload.probability * 100).toFixed(1)}%<br />
-                            Price: $${payload.price.toFixed(2)}
-                        </div>`;
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><strong>${symbol}</strong> — ${payload.signal}</span>
+                                <span class="badge ${badgeClass}">Weight ${(payload.probability * 100).toFixed(1)}%</span>
+                            </div>
+                            <div class="card-body">
+                                <p class="mb-2">
+                                    Price: $${payload.price.toFixed(2)} |
+                                    Entry confidence: ${entry.confidence || 'n/a'} |
+                                    Exit confidence: ${exit.confidence || 'n/a'}
+                                </p>
+                                <p class="mb-2">
+                                    Entry stop: ${stopLoss} | Entry take: ${takeProfit}<br/>
+                                    Exit stop: ${exitStop} | Exit take: ${exitTake}
+                                </p>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered">
+                                        <thead><tr><th>Feature</th><th>Value</th><th>Z-score</th></tr></thead>
+                                        <tbody>${featureRows}</tbody>
+                                    </table>
+                                </div>
+                                <p class="text-muted mb-0">Entry composite Z: ${entryComposite.toFixed(3)} | Exit composite Z: ${exitComposite.toFixed(3)}</p>
+                            </div>
+                        </div>
+                    `;
+
+                    labels.push(symbol);
+                    entryWeights.push(entryWeight);
+                    exitWeights.push(exitWeight);
                 });
+
+                if (labels.length && typeof Plotly !== 'undefined') {
+                    Plotly.newPlot('confidenceChart', [
+                        { x: labels, y: entryWeights, name: 'Entry Weight', type: 'bar' },
+                        { x: labels, y: exitWeights, name: 'Exit Weight', type: 'bar' }
+                    ], {
+                        title: 'Signal Weights',
+                        barmode: 'group',
+                        yaxis: { title: 'Weight' },
+                        xaxis: { title: 'Symbol' },
+                        height: 350
+                    });
+                } else if (confidenceChart) {
+                    confidenceChart.innerHTML = '<p class="text-muted">No signals available</p>';
+                }
             });
     }
 

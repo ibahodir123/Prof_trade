@@ -1,27 +1,27 @@
-# Памятка по переобучению моделей (BTC/USDT, 4h)
+# Model Retraining Checklist (BTC/USDT, 4h)
 
-1. Локально зафиксируй код
+1. Prepare local repository
    git status
-   git add <файлы>
+   git add <files>
    git commit -m "..."
    git push
 
-2. На сервере Vultr
+2. Connect to Vultr host
    ssh root@<IP>
    cd /root/Prof_trade
    git pull
    source .venv/bin/activate
 
-3. Запусти обучение
+3. Launch training job
    nohup python train_models.py > train.log 2>&1 &
    tail -f train.log
    ps aux | grep train_models.py
 
-4. После завершения
-   cat models/training_metadata.json     # должна быть свежая дата, ["BTC/USDT"], timeframe "4h"
-   cat models/phase_weight_stats.json    # есть статистика импульсов/коррекций
+4. Verify training outputs
+   cat models/training_metadata.json     # expect latest date, symbols ["BTC/USDT"], timeframe "4h"
+   cat models/phase_weight_stats.json    # check impulse/correction distribution
 
-5. Скопируй файлы на локальный ПК
+5. Sync artefacts back to workstation
    scp root@<IP>:/root/Prof_trade/models/entry_model.pkl d:\Best_trade\models\
    scp root@<IP>:/root/Prof_trade/models/exit_model.pkl  d:\Best_trade\models\
    scp root@<IP>:/root/Prof_trade/models/ema_scaler.pkl d:\Best_trade\models\
@@ -29,12 +29,12 @@
    scp root@<IP>:/root/Prof_trade/models/training_metadata.json d:\Best_trade\models\
    scp root@<IP>:/root/Prof_trade/models/phase_weight_stats.json d:\Best_trade\models\
 
-6. При необходимости зафиксируй JSON в git
+6. Stage metadata changes only
    cd d:\Best_trade
    git add -f models/training_metadata.json models/phase_weight_stats.json
    git commit -m "Update training metadata/phase stats"
    git push
 
-7. Обнови локальные сервисы
-   перезапусти бота/дашборд, убедись, что они подхватили новые .pkl и phase_weight_stats.json
-   проверь бэктесты / сигналы
+7. Final checks before release
+   Confirm dashboards/automation pick up new .pkl and phase_weight_stats.json
+   Update deployment notes or changelog if needed

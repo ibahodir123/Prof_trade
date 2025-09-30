@@ -188,3 +188,10 @@ Thumbs.db
 __pycache__/
 *.pyc
 data_batch_*.json
+
+models/*.pkl
+models/*.sav
+*.csv
+*_summary.json
+data_*.parquet
+backtest_*.json
